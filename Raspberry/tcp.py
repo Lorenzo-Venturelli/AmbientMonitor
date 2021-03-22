@@ -1,4 +1,5 @@
 import socket, threading
+from interfaces import Data, Event, CryptoHandler, System
 
 class tcpClient(threading.Thread):
     def __init__(self, address: str, port: int, event: object, data: object):
