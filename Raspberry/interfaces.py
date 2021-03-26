@@ -14,7 +14,7 @@ except ImportError:
 
 class System():
 
-    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
+    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000", "RSA" : 1024}
     _DEFAULT_PATH = "./"
 
     def __init__(self, path: str = System._DEFAULT_PATH):
@@ -61,10 +61,10 @@ class System():
             raise e
         self._lock.release()                                                # Rebuild the settings file and try to write again
 
-    def updateSettings(self, Country: str = None, City: str = None, samplingSpeed: int = None, sendingFreq: int = None, UID: str = None) -> None:
+    def updateSettings(self, Country: str = None, City: str = None, samplingSpeed: int = None, sendingFreq: int = None, UID: str = None, RSA: int = None) -> None:
         '''Update System settings. Invalid settings will be ignored'''
 
-        newParams = [Country, City, samplingSpeed, sendingFreq, UID]
+        newParams = [Country, City, samplingSpeed, sendingFreq, UID, RSA]
 
         self._lock.acquire()                                                # Avoid race conditions
 
@@ -80,6 +80,8 @@ class System():
                     self._settings["sendingFreq"] = item
                 elif item == UID and type(item) == str and len(item) == 10:
                     self._settings["UID"] = item
+                elif item == RSA and type(item) == int:
+                    self._settings["RSA"] = item
 
         try:
             with open(self._filename, "w") as fp:                           # Update the settings file
@@ -120,6 +122,10 @@ class System():
     @property
     def filename(self) -> str:
         return copy.deepcopy(self._filename)
+
+    @property
+    def defaultSettings(self) -> dict:
+        return copy.deepcopy(self._DEFAULT_SETTINGS)
 
 class Data():
     _SUPPORTED_TYPES = ["int", "float", "str", "tuple", "list", "dict", "object", "func"]
