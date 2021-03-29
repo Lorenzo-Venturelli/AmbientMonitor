@@ -2,30 +2,37 @@ import socket, threading
 from interfaces import Data, Event, CryptoHandler, System
 
 class tcpClient(threading.Thread):
-    def __init__(self, address: str, port: int, event: object, data: object, system: object):
-        if (type(address) != str or type(port) != int or isinstance(event, Event) != True 
-            or isinstance(data, Data) != True or isinstance(system, System) != True):
+
+    _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234}
+    def __init__(self, event: object, data: object, system: object):
+        if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
             raise TypeError
-        
-        self._handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._handler.settimeout(5.0)                                       # Timeout after 5 seconds
-        self._serverAddr = address
-        self._serverPort = port
-        self._status = False
+
         self._event = event
         self._data = data
         self._system = system
-        self._srvPubKey = None
-        self._cltPubKey = None
-        self._cltPrivKey = None
-        self._aesKey = None
-        self._running = True
+        
+        self._handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)           # Create the socket endpoint
+        self._handler.settimeout(5.0)                                               # Timeout after 5 seconds
+
+        for item in self._DEFAULT_TCP_SETTINGS.keys():                              # If this thread's settings don't exist, create them from default ones
+            if item not in self._system.settings:
+                self._system.updateSettings(newSettings = {item : self._DEFAULT_TCP_SETTINGS[item]})
+
+        self._connected = False                                                     # This client is connected to the server
+        self._isRunning = True                                                      # This thread is alive
+        self._srvPubKey = None                                                      # Server's RSA public key
+        self._cltPubKey = None                                                      # This client's RSA public key
+        self._cltPrivKey = None                                                     # This client's RSA private key
+        self._aesKey = None                                                         # AES key
+        
+        super(daemon = False)
     
     def _connect(self):
         '''Connect to the server'''
 
         try:
-            self._handler.connect((self._serverAddr, self._serverPort))
+            self._handler.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
             self._status = True
         except OSError:
             self._handler.close()
@@ -41,7 +48,7 @@ class tcpClient(threading.Thread):
         '''Kill this thread'''
 
         self._running = False
-        self._event.post(eventName = "tcpEvent")
+        self._event.post(eventName = "tcpEvent")###################### da vedere
 
     def _handshake(self) -> bool:
         '''Execute the connection's handshake'''

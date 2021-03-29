@@ -61,27 +61,20 @@ class System():
             raise e
         self._lock.release()                                                # Rebuild the settings file and try to write again
 
-    def updateSettings(self, Country: str = None, City: str = None, samplingSpeed: int = None, sendingFreq: int = None, UID: str = None, RSA: int = None) -> None:
+    def updateSettings(self, newSettings: dict) -> None:
         '''Update System settings. Invalid settings will be ignored'''
 
-        newParams = [Country, City, samplingSpeed, sendingFreq, UID, RSA]
+        if type(newSettings) != dict:
+            raise TypeError
 
         self._lock.acquire()                                                # Avoid race conditions
 
-        for item in newParams:                                              # Check each parameter and if it's valid save it
-            if item != None:
-                if item == Country and type(item) == str:
-                    self._settings["Country"] = item
-                elif item == City and type(item) == str:
-                    self._settings["City"] = item
-                elif item == samplingSpeed and type(item) == int:
-                    self._settings["samplingSpeed"] = item
-                elif item == sendingFreq and type(item) == int:
-                    self._settings["sendingFreq"] = item
-                elif item == UID and type(item) == str and len(item) == 10:
-                    self._settings["UID"] = item
-                elif item == RSA and type(item) == int:
-                    self._settings["RSA"] = item
+        for item in newSettings.keys:                                       # Check each parameter and if it's valid save it
+            if item in self._DEFAULT_SETTINGS.keys():                         # If this item is well known, check its validity
+                if type(newSettings[item]) == type(self._DEFAULT_SETTINGS[item]):
+                    self._settings[item] = copy.deepcopy(newSettings[item])
+            else:                                                           # This item is not recognizd, just update it
+                self._settings[item] = copy.deepcopy(newSettings[item])
 
         try:
             with open(self._filename, "w") as fp:                           # Update the settings file
@@ -406,7 +399,7 @@ class Event():
             self._events[eventName][0].clear()                              # Clear this event
             return result
 
-    def post(self, eventName: bool) -> bool:
+    def post(self, eventName: str) -> bool:
         '''Post (eventName)'''
 
         if type(eventName) != str:
@@ -541,5 +534,5 @@ class CryptoHandler():
         return rsa.PublicKey.load_pkcs1(keyfile = PEMfile, format = "PEM")
 
 if __name__ == "__main__":
-    print("Fatal error: This program have to be used as a module")
+    print("Fatal error: This program has to be used as a module")
     exit()
