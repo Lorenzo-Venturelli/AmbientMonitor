@@ -1,4 +1,4 @@
-import threading, json, os, subprocess, copy, hashlib, base64
+import threading, json, os, subprocess, copy, logging, hashlib, base64
 try:
     import rsa
 except ImportError:
@@ -17,9 +17,11 @@ class System():
     _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000", "RSA" : 1024}
     _DEFAULT_PATH = "./"
 
-    def __init__(self, path: str = System._DEFAULT_PATH):
-        if type(path) != str:
+    def __init__(self, logger: object, path: str = System._DEFAULT_PATH):
+        if type(path) != str or isinstance(logger, logging.Logger) == False:
             raise TypeError
+
+        self._logger = logger
 
         if path[-1] != "/":                                                 # Check the path format and eventually correct it
             path = path + "/"
@@ -30,19 +32,23 @@ class System():
 
         try:
             if os.path.exists(path) == False:                               # Check wether the file exists or not
+                self._logger.debug("Settings file doesn't exist")
                 subprocess.call("touch " + path)                            # Eventually create it
                 subprocess.call("chmod 744 " + path)                        # Set privileges
                 self._settings = System._DEFAULT_SETTINGS                   # Initialize the file with default settings
                 with open(path, "w") as fp:
                     json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
             else:
+                self._logger.debug("Settings file exists")
                 with open(path, "r") as fp:
                     self._settings = json.load(fp)
         except json.JSONDecodeError:                                        # Corrupted settings file
+            self._logger.error("Settings file is corrupted, overwrite")
             self._settings = System._DEFAULT_SETTINGS                       # Initialize the file with default settings
             with open(path, "w") as fp:
                 json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
+            self._logger.critical("Unexpected error in System constructor.", exc_info = True)
             raise e
 
     def _rebuildFile(self) -> None:
@@ -50,16 +56,19 @@ class System():
 
         self._lock.acquire()                                                # Avoid race conditions
         try:
+            self._logger.debug("Rebuild settings file")
             if os.path.exists(self._filename) == False:                     # Check wether the file exists or not
+                self._logger.debug("Settings file doesn't exist")
                 subprocess.call("touch " + self._filename)                  # Eventually create it
                 subprocess.call("chmod 744 " + self._filename)              # Set privileges
                 self._settings = System._DEFAULT_SETTINGS                   # Initialize the file with default settings
             with open(self._filename, "w") as fp:
                 json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
-            self._lock.release()                                            # Rebuild the settings file and try to write again
+            self._logger.critical("Unexpected error while rebuilding the settings file", exc_info = True)
+            self._lock.release()                                            
             raise e
-        self._lock.release()                                                # Rebuild the settings file and try to write again
+        self._lock.release()                                                
 
     def updateSettings(self, newSettings: dict) -> None:
         '''Update System settings. Invalid settings will be ignored'''
@@ -70,7 +79,7 @@ class System():
         self._lock.acquire()                                                # Avoid race conditions
 
         for item in newSettings.keys:                                       # Check each parameter and if it's valid save it
-            if item in self._DEFAULT_SETTINGS.keys():                         # If this item is well known, check its validity
+            if item in self._DEFAULT_SETTINGS.keys():                       # If this item is well known, check its validity
                 if type(newSettings[item]) == type(self._DEFAULT_SETTINGS[item]):
                     self._settings[item] = copy.deepcopy(newSettings[item])
             else:                                                           # This item is not recognizd, just update it
@@ -80,6 +89,7 @@ class System():
             with open(self._filename, "w") as fp:                           # Update the settings file
                 json.dump(self._settings, fp, indent = 4, sort_keys = True)
         except Exception:
+            self._logger.error("Impossible to deal with settings file, rebuild it", exc_info = True)
             self._lock.release()                                            # Rebuild the settings file and try to write again
             self._rebuildFile()
 
@@ -102,6 +112,7 @@ class System():
             subprocess.call("mv " + self._filename + " " + newPath)         # Move the settings file
             self._filename = newPath
         except Exception:
+            self._logger.error("Impossoible to move the settings file", exc_info = True)
             self._lock.release()
             return False
 
@@ -123,9 +134,13 @@ class System():
 class Data():
     _SUPPORTED_TYPES = ["int", "float", "str", "tuple", "list", "dict", "object", "func"]
 
-    def __init__(self):
+    def __init__(self, logger: object):
+        if isinstance(logger, logging.Logger) == False:
+            raise TypeError
+
         self._lock = threading.Lock()
         self._data = dict()
+        self._logger = logger
     
     @property
     def supportedTypes(self):
@@ -175,6 +190,7 @@ class Data():
             self._data[itemName] = (copy.deepcopy(item), itemType)  # Store the item
             self._lock.release()
         except Exception:
+            self._logger.error("Impossible to store an item.", exc_info = True)
             self._lock.release()
             return False
 
@@ -194,6 +210,7 @@ class Data():
                 item = copy.deepcopy(self._data[itemName][0])
                 self._lock.release()
             except Exception:                                       # Unexpected error, return None
+                self._logger.error("Impossible to load an item.", exc_info = True)
                 self._lock.release()
                 return None
             return item
@@ -212,6 +229,7 @@ class Data():
                 del self._data[itemName]                            # Delete it
                 self._lock.release()
             except Exception:                                       # Unexpected error
+                self._logger.error("Impossible to remove an item.", exc_info = True)
                 self._lock.release()
                 return False
             
@@ -237,6 +255,7 @@ class Data():
                     self._data[itemName][0].append(index, copy.deepcopy(element))
                     self._lock.release()
                 except Exception:                                                           # Unexpected error
+                    self._logger.error("Impossible to insert an item into a list.", exc_info = True)
                     self._lock.release()
                     return False
 
@@ -264,9 +283,11 @@ class Data():
                     del self._data[itemName][0][index]
                 self._lock.release()
             except IndexError:                                                              # The index is not valid
+                self._logger.error("Invalid index, item not in list.")
                 self._lock.release()
                 return None
             except Exception as e:                                                          # Unknown exception, release this interface and propagate the error
+                self._logger.critical("Unknown error occurred while reading a lsit", exc_info = True)
                 self._lock.release()
                 raise e
             return element
@@ -289,6 +310,7 @@ class Data():
                     self._lock.release()
                     return True
                 except Exception:
+                    self._logger.error("Impossible to insert an item into a dict.", exc_info = True)
                     self._lock.release()
                     return False
 
@@ -312,6 +334,7 @@ class Data():
                         self._lock.release()
                         return copy.deepcopy(element)
                     except Exception:                                                       # Unexpected error, return None
+                        self._logger.error("Impossible to get an item from a dict.", exc_info = True)
                         self._lock.release()
                         return None
         

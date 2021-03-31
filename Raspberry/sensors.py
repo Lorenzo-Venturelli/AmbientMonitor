@@ -1,4 +1,4 @@
-import time, copy, threading
+import time, copy, threading, logging
 from interfaces import Data, Event, System
 try:
     import board, adafruit_dht as DHT22, adafruit_bh1750 as BH1750, Adafruit_BMP.BMP085 as BMP185
@@ -12,11 +12,15 @@ class Sensors(threading.Thread):
     
     _DEFAULT_TEMP_SENSOR_PIN = board.D26
 
-    def __init__(self, data: object, event: object, system: object):
+    def __init__(self, data: object, event: object, system: object, logger: object):
+        if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
+            raise TypeError
+
         # Interfaces
         self._data = data
         self._event = event
         self._system = system
+        self._logger = logger
 
         if "tempSensorPin" not in self._system.settings:
             self._system.updateSettings(newSettings = {"tempSensorPin" : self._DEFAULT_TEMP_SENSOR_PIN})
@@ -38,6 +42,7 @@ class Sensors(threading.Thread):
         self._event.post(eventName = "readSensors")                                         # Post the event to trigger the polling
         self._periodicClb = threading.Timer(interval = self._system.settings["samplingSpeed"], function = self._executePolling)
         self._periodicClb.start()
+        self._logger.debug("Sensors polling")
         return
 
     def stopThread(self) -> None:
@@ -52,11 +57,13 @@ class Sensors(threading.Thread):
 
         self._periodicClb = threading.Timer(interval = self._system.settings["samplingSpeed"], function = self._executePolling)
         self._periodicClb.start()
+        self._logger.debug("Sensors' thread started")
 
         while True:
             self._event.pend(eventName = "readSensors")                                     # Wait the periodic event
 
             if self._isRunning == False:                                                    # If the thread is not running anymore, return
+                self._logger.debug("Sensors' thread closed")
                 return
 
             newData = dict()   
@@ -67,8 +74,8 @@ class Sensors(threading.Thread):
                 newData["temperature"] = self._sensorsList["T&H"].temperature
                 newData["humidity"] = self._sensorsList["T&H"].humidity
                 newData["Ligth"] = self._sensorsList["L"].lux
-            except Exception as e:                                                          # In case of errors abort this reading and go back waitig
-                print("Eccezione di debug sensori: " + e)
+            except Exception:                                                               # In case of errors abort this reading and go back waitig
+                self._logger.error("Sensors read failed", exc_info = True)
                 continue
 
             # Try to save these data. If something happen, recreate the item into Data interface

@@ -1,4 +1,4 @@
-import socket, threading
+import socket, threading, logging
 from interfaces import Data, Event, CryptoHandler, System
 
 class tcpClient(threading.Thread):
@@ -8,13 +8,15 @@ class tcpClient(threading.Thread):
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
 
-    def __init__(self, event: object, data: object, system: object):
-        if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
+    def __init__(self, event: object, data: object, system: object, logger: object):
+        if (isinstance(event, Event) != True  or isinstance(data, Data) != True 
+            or isinstance(system, System) != True or isinstance(logger, logging.Logger) == False):
             raise TypeError
 
         self._event = event
         self._data = data
         self._system = system
+        self._logger = logger
         
         self._handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)           # Create the socket endpoint
         self._handler.settimeout(5.0)                                               # Timeout after 5 seconds
@@ -39,6 +41,7 @@ class tcpClient(threading.Thread):
             self._handler.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
             self._status = True
         except OSError:
+            self._logger.error("Impossible to connect to the TCP server")
             self._handler.close()
             self._status = False
 
@@ -95,12 +98,14 @@ class tcpClient(threading.Thread):
                         self._handler.sendall(msg)
                         msg = self._handler.recv(1024)
                         if msg == self._TCP_ACK_OK:                         # Server confirmed reception
+                            self._logger.debug("TCP handshake done")
                             return True                                     # Handshake completed successfully
 
             # If something goes wrong, the handshake fail and all the keys are destoryed. The problem is notified
             self._handler.sendall(self._TCP_ACK_ERROR)
             raise Exception("Handshake failed")                                               
         except Exception:                                                   # In case of error, restore default settings
+            self._logger.error("Error occurred during TCP handshake", exc_info = True)
             self._srvPubKey = None
             self._cltPubKey = None
             self._cltPrivKey = None
