@@ -4,6 +4,10 @@ from interfaces import Data, Event, CryptoHandler, System
 class tcpClient(threading.Thread):
 
     _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234}
+    _HANDSHAKE_REQUEST = b"199"
+    _TCP_ACK_OK = b"200"
+    _TCP_ACK_ERROR = b"400"
+
     def __init__(self, event: object, data: object, system: object):
         if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
             raise TypeError
@@ -54,41 +58,48 @@ class tcpClient(threading.Thread):
         '''Execute the connection's handshake'''
 
         try:
-            self._handler.sendall(b'199')                                   # Request RSA handshake
-            msg = self._handler.recv(1024)                                  # Get RSA keys length
-            if msg != None and msg != 0 and msg != '' and msg != b'':
-                msg = msg.decode()
-                
-                if msg in CryptoHandler.RSA_LENGTH:                         # Key length is supported
-                    if msg != self._system.settings["RSA"]:                 # If the key length is different
-                        self._system.updateSettings(RSA = msg)              # Update the RSA key settings
-                    self._handler.sendall(b'200')                           # Acknowledge the reception
-                    msg = self._handler.recv(1024)                          # Get RSA pub key from the server
-                    
-                    if msg != None and msg != 0 and msg != '' and msg != b'':
-                        self._srvPubKey = CryptoHandler.importRSApub(PEMfile = msg)         # Import the server public key
-                        self._handler.sendall(b'200')                                       # Acknowledge the reception
-                        
-                        # Generate a new RSA key pair and AES key
-                        (self._cltPubKey, self._cltPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
+            msg = self._handler.recv(1024)                                  # Wait the server to request handshake
+            if msg == self._HANDSHAKE_REQUEST:                              # Handshake request
+                self._handler.sendall(self._TCP_ACK_OK)                     # Asnwer that we are ready
 
-                        # Generate a new 128 bit AES key and encrypt it with the server public key
-                        self._aesKey = CryptoHandler.generateAES()
-                        msg = CryptoHandler.RSAencrypt(pubkey = self._srvPubKey, raw = self._aesKey)
+                msg = self._handler.recv(1024)                              # Get RSA keys length
+                if msg != None and msg != 0 and msg != '' and msg != b'':   # Valid message
+                    msg = int(msg.decode())
+
+                    if msg in CryptoHandler.RSA_LENGTH:                                         # Key length is supported
+                        if msg != self._system.settings["RSA"]:                                 # If the key length is different
+                            self._system.updateSettings(newSettings = {"RSA" : msg})            # Update the RSA key settings
+                        self._handler.sendall(self._TCP_ACK_OK)                                 # Acknowledge the reception
+                    else:                                                                       # Key length not supported, handshake failed
+                        self._handler.sendall(self._TCP_ACK_ERROR)                              # Notify the problem
+                        return False
+
+                    msg = self._handler.recv(1024)                                              # Get the server public key
+                    self._srvPubKey = CryptoHandler.importRSApub(PEMfile = msg)                 # Import it
+
+                    # Generate a new random AES key
+                    self._aesKey = CryptoHandler.generateAES()
+                    
+                    # Generate a new RSA key pair and AES key
+                    (self._cltPubKey, self._cltPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
+
+                    # Encrypt the AES key with the server's public RSA key
+                    msg = CryptoHandler.RSAencrypt(pubkey = self._srvPubKey, raw = self._aesKey)
+
+                    self._handler.sendall(msg)                              # Send the encrypted AES key
+                    msg = self._handler.recv(1024)
+                    if msg == self._TCP_ACK_OK:                             # Server confirmed reception
                         
-                        self._handler.sendall(msg)                          # Send the AES key
-                        msg = self._handler.recv(1024)                      # Get the server pub key
-                        
-                        if msg != None and msg != 0 and msg != '' and msg != b'':
-                            
-                            # Export and crypt my rsa public key
-                            msg = CryptoHandler.AESencrypt(key = self._aesKey, raw = CryptoHandler.exportRSApub(pubkey = self._cltPubKey), byteObject = False)
-                            self._handler.sendall(msg)                      # Send this key to the server
-                        
-                            msg = self._handler.recv(1024)                  # Wait ack
-                            if msg == b"200":                               # Ack received handshake done
-                                return True
-            return False                                                    # Something went wrong, handshake failed
+                        # Encrypt this client RSA pubkey with the shared AES key
+                        msg = CryptoHandler.AESencrypt(key = self._aesKey, raw = CryptoHandler.exportRSApub(pubkey = self._cltPubKey), byteObject = True)
+                        self._handler.sendall(msg)
+                        msg = self._handler.recv(1024)
+                        if msg == self._TCP_ACK_OK:                         # Server confirmed reception
+                            return True                                     # Handshake completed successfully
+
+            # If something goes wrong, the handshake fail and all the keys are destoryed. The problem is notified
+            self._handler.sendall(self._TCP_ACK_ERROR)
+            raise Exception("Handshake failed")                                               
         except Exception:                                                   # In case of error, restore default settings
             self._srvPubKey = None
             self._cltPubKey = None
