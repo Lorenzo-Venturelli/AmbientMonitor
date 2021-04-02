@@ -6,8 +6,11 @@ from interfaces import System, Data, Event
 class InterruptHandler(object):
     '''Handle system signals gracefully to permit a clean exit'''
 
-    def __init__(self, signals = (signal.SIGINT, signal.SIGTERM)):
-        self.signals = signal                                           # Touple of handled signals (for us only the ones related to closign the program)
+    def __init__(self, signals: tuple = (signal.SIGINT, signal.SIGTERM)):
+        if type(signals) != tuple:
+            raise TypeError
+            
+        self.signals = signals                                          # Touple of handled signals (for us only the ones related to closign the program)
         self.original_handlers = {}                                     # Original handlers from the signal module
 
     def __enter__(self):                                                # Method called when this object is opened as an handler
@@ -39,7 +42,7 @@ class InterruptHandler(object):
 
 
 if __name__ == "__main__":
-    with InterruptHandler as sig:
+    with InterruptHandler() as sig:
         try:
             logger = logging.getLogger(name = "systemLog")                      # Create the logger handler
 
