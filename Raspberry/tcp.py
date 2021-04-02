@@ -1,14 +1,14 @@
 import socket, threading, logging
 from interfaces import Data, Event, CryptoHandler, System
 
-class tcpClient(threading.Thread):
+class TcpClient(threading.Thread):
 
     _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234}
     _HANDSHAKE_REQUEST = b"199"
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
 
-    def __init__(self, event: object, data: object, system: object, logger: object):
+    def __init__(self,  data: object, event: object, system: object, logger: object):
         if (isinstance(event, Event) != True  or isinstance(data, Data) != True 
             or isinstance(system, System) != True or isinstance(logger, logging.Logger) == False):
             raise TypeError

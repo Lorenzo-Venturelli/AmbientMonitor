@@ -342,7 +342,11 @@ class Data():
 
 class Event():
 
-    def __init__(self):
+    def __init__(self, logger: object):
+        if isinstance(logger, logging.Logger) == False:
+            raise TypeError
+
+        self._logger = logger
         self._events = dict()
         self._lock = threading.Lock()
 
@@ -393,6 +397,7 @@ class Event():
                     self._lock.release()
                     return True
                 except Exception:                                       # Unexpected error
+                    self._logger.error("Impossible to delete an event", exc_info = True)
                     self._lock.release()
                     return False
 
