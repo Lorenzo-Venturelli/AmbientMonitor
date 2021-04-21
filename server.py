@@ -1,10 +1,15 @@
-import socket 
+import socket, asyncio
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind((socket.gethostname(), 1234))
-s.listen(5)
 
-while True:
-    clientsocket, address = s.accept()
-    print(f"Connectione form {address} has been established!")
-    clientsocket.send(bytes("Welcome to the server!","utf-8"))
+async def serveClient(reader, writer):
+    t = (await reader.read(1024)).decode()
+    print("Client " + str(writer.get_extra_info("peername")) + " sent " + str(t))
+    writer.close()
+    return
+
+async def runServer():
+    server = await asyncio.start_server(serveClient, socket.gethostname(), 1234)
+    async with server:
+        await server.serve_forever()
+
+asyncio.run(runServer())

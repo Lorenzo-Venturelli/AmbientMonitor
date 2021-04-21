@@ -3,7 +3,7 @@ from interfaces import Data, Event, CryptoHandler, System
 
 class TcpClient(threading.Thread):
 
-    _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234}
+    _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234, "RSA" : 1024}
     _HANDSHAKE_REQUEST = b"199"
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
@@ -34,7 +34,7 @@ class TcpClient(threading.Thread):
         
         super(daemon = False)
     
-    def _connect(self):
+    def _connect(self) -> None:
         '''Connect to the server'''
 
         try:
@@ -45,13 +45,13 @@ class TcpClient(threading.Thread):
             self._handler.close()
             self._status = False
 
-    def _disconnect(self):
+    def _disconnect(self) -> None:
         '''Disconnect from the server'''
 
         self._handler.close()
         self._status = False
 
-    def stopThread(self):
+    def stopThread(self) -> None:
         '''Kill this thread'''
 
         self._running = False
@@ -113,7 +113,7 @@ class TcpClient(threading.Thread):
             self._system.updateSettings(RSA = self._system.defaultSettings["RSA"])
             return False
 
-    def run(self):
+    def run(self) -> None:
         '''while True:
             self._msgReady.wait(timeout = None)                             # Wait until a message is ready to be sent
             self._msgReady.clear                                            

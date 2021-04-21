@@ -1,44 +1,7 @@
 #!/bin/python3
 import threading, logging, sys, time, signal
 import tcp, sensors
-from interfaces import System, Data, Event
-
-class InterruptHandler(object):
-    '''Handle system signals gracefully to permit a clean exit'''
-
-    def __init__(self, signals: tuple = (signal.SIGINT, signal.SIGTERM)):
-        if type(signals) != tuple:
-            raise TypeError
-            
-        self.signals = signals                                          # Touple of handled signals (for us only the ones related to closign the program)
-        self.original_handlers = {}                                     # Original handlers from the signal module
-
-    def __enter__(self):                                                # Method called when this object is opened as an handler
-        self.interrupted = False                                        # Reset status flags
-        self.released = False
-
-        for sig in self.signals:                                        
-            self.original_handlers[sig] = signal.getsignal(sig)         # Get the original handlers for each signal
-            signal.signal(sig, self.handler)                            # Substitute the origina ones with this class' one
-
-        return self
-
-    def __exit__(self, type, value, tb):                                # Method called when this class' object is closed
-        self.release()
-
-    def handler(self, signum, frame):                                   # Method invoked when a system signal is received
-        self.release()
-        self.interrupted = True
-
-    def release(self):                                                  # For each signal that we are handling, set back the original handler
-        if self.released == True:
-            return False
-
-        for sig in self.signals:
-            signal.signal(sig, self.original_handlers[sig])
-
-        self.released = True
-        return True
+from interfaces import System, Data, Event, InterruptHandler
 
 
 if __name__ == "__main__":

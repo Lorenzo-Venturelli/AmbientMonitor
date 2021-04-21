@@ -11,6 +11,7 @@ except Exception as e:
 class Sensors(threading.Thread):
     
     _DEFAULT_TEMP_SENSOR_PIN = board.D26
+    _DEFAULT_SENSORS_SETTINGS = {"tempSensorPin" : _DEFAULT_TEMP_SENSOR_PIN}
 
     def __init__(self, data: object, event: object, system: object, logger: object):
         if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
@@ -23,7 +24,7 @@ class Sensors(threading.Thread):
         self._logger = logger
 
         if "tempSensorPin" not in self._system.settings:
-            self._system.updateSettings(newSettings = {"tempSensorPin" : self._DEFAULT_TEMP_SENSOR_PIN})
+            self._system.updateSettings(newSettings = self._DEFAULT_SENSORS_SETTINGS)
 
         # Sensors' list
         self._sensorsList = {"T&H" : DHT22.DHT22(board.D26), "P" : BMP185.BMP085(), "L" : BH1750.BH1750(board.I2C())}

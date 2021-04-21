@@ -14,7 +14,7 @@ except ImportError:
 
 class System():
 
-    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
+    _DEFAULT_SETTINGS = {}
     _DEFAULT_PATH = "./"
 
     def __init__(self, logger: object, path: str = System._DEFAULT_PATH):
@@ -61,7 +61,7 @@ class System():
                 self._logger.debug("Settings file doesn't exist")
                 subprocess.call("touch " + self._filename)                  # Eventually create it
                 subprocess.call("chmod 744 " + self._filename)              # Set privileges
-                self._settings = System._DEFAULT_SETTINGS                   # Initialize the file with default settings
+                self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)    # Initialize the file with default settings
             with open(self._filename, "w") as fp:
                 json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
