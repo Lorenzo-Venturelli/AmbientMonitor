@@ -114,30 +114,7 @@ class TcpClient(threading.Thread):
             return False
 
     def run(self) -> None:
-        '''while True:
-            self._msgReady.wait(timeout = None)                             # Wait until a message is ready to be sent
-            self._msgReady.clear                                            
-
-            if self._running == False:                                      # Check if the sistem is still alive
-                break
-
-            self._connect()                                                 # Try to connect to the server
-            if self._status == True:                                        # Connected
-                print("Connection successfull")
-                failed = list()                                             # Prepare a list to store failed messages (we will try next time)
-                msgQueue = self._dataProxy.getValue["msgQueue"]             # Get the messages to send
-                
-                for msg in msgQueue:                                        # Try to send each message
-                   self._handler.sendall(msg)
-                   answer = self._handler.recv(1024)                        # Wait the answer
-                   if answer != b"200":                                     # If no answer or a worng answer is received, save the message to try again
-                       failed.append(msg)
-
-                self._dataProxy.setValue["msgQueue"] = failed               # Update the message queue
-                self._disconnect()                                          # Close connection
-            else:
-                print("Connection failed")
-                continue'''
-        
+        while True:
+             self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
         return
 
