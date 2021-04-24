@@ -115,6 +115,11 @@ class TcpClient(threading.Thread):
 
     def run(self) -> None:
         while True:
-             self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
+            if self._handshake():
+                self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
+                msg = self._handler.recv(1024)
+                if msg == self._TCP_ACK_OK:
+                    self._handler.close()
+                    self.stopThread()
         return
 
