@@ -1,12 +1,12 @@
 #!/bin/python3
 
-import sys
+import sys, socket
 arguments = len(sys.argv) - 1
 if arguments > 0:
     if sys.argv[1] == 'debug':
         import ptvsd
         # Allow other computers to attach to ptvsd at this IP address and port.
-        ptvsd.enable_attach(address=('192.168.1.150', 3000))
+        ptvsd.enable_attach(address=(socket.gethostname, 3000))
         # Pause the program until a remote debugger is attached	
         ptvsd.wait_for_attach()
 
