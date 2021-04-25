@@ -17,7 +17,7 @@ class System():
     _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
     _DEFAULT_PATH = "./"
 
-    def __init__(self, logger: object, path: str = System._DEFAULT_PATH):
+    def __init__(self, logger: object, path: str = _DEFAULT_PATH):
         if type(path) != str or isinstance(logger, logging.Logger) == False:
             raise TypeError
 
@@ -35,18 +35,18 @@ class System():
                 self._logger.debug("Settings file doesn't exist")
                 subprocess.call("touch " + path)                            # Eventually create it
                 subprocess.call("chmod 744 " + path)                        # Set privileges
-                self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)    # Initialize the file with default settings
+                self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)      # Initialize the file with default settings
                 with open(path, "w") as fp:
-                    json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+                    json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
             else:
                 self._logger.debug("Settings file exists")
                 with open(path, "r") as fp:
                     self._settings = json.load(fp)
         except json.JSONDecodeError:                                        # Corrupted settings file
             self._logger.error("Settings file is corrupted, overwrite")
-            self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)        # Initialize the file with default settings
+            self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)               # Initialize the file with default settings
             with open(path, "w") as fp:
-                json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+                json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
             self._logger.critical("Unexpected error in System constructor.", exc_info = True)
             raise e
@@ -61,9 +61,9 @@ class System():
                 self._logger.debug("Settings file doesn't exist")
                 subprocess.call("touch " + self._filename)                  # Eventually create it
                 subprocess.call("chmod 744 " + self._filename)              # Set privileges
-                self._settings = System._DEFAULT_SETTINGS                   # Initialize the file with default settings
+                self._settings = self._DEFAULT_SETTINGS                     # Initialize the file with default settings
             with open(self._filename, "w") as fp:
-                json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+                json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
             self._logger.critical("Unexpected error while rebuilding the settings file", exc_info = True)
             self._lock.release()                                            
@@ -146,7 +146,7 @@ class Data():
     @property
     def supportedTypes(self):
         '''Supported value types'''
-        return copy.deepcopy(Data._SUPPORTED_TYPES)
+        return copy.deepcopy(self._SUPPORTED_TYPES)
 
     def isPresetn(self, itemName: str) -> bool:
         '''Check if an item with (itemName) is stored in this interface'''
@@ -168,7 +168,7 @@ class Data():
         if type(itemName) != str or type(itemType) != str:
             raise TypeError
 
-        if itemType not in Data._SUPPORTED_TYPES:               # If the item type is not supported, treat this item like a generic object
+        if itemType not in self._SUPPORTED_TYPES:               # If the item type is not supported, treat this item like a generic object
             itemType = "object"
 
         if itemType == "int" and type(item) != int:
