@@ -31,21 +31,21 @@ class System():
         self._lock = threading.Lock()
 
         try:
-            if os.path.exists(path) == False:                               # Check wether the file exists or not
+            if os.path.exists(self._filename) == False:                     # Check wether the file exists or not
                 self._logger.debug("Settings file doesn't exist")
-                subprocess.call("touch " + path)                            # Eventually create it
-                subprocess.call("chmod 744 " + path)                        # Set privileges
+                subprocess.call(["touch", self._filename])                  # Eventually create it
+                subprocess.call(["chmod", "744",  self._filename])          # Set privileges
                 self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)      # Initialize the file with default settings
-                with open(path, "w") as fp:
+                with open(self._filename, "w") as fp:
                     json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
             else:
                 self._logger.debug("Settings file exists")
-                with open(path, "r") as fp:
+                with open(self._filename, "r") as fp:
                     self._settings = json.load(fp)
         except json.JSONDecodeError:                                        # Corrupted settings file
             self._logger.error("Settings file is corrupted, overwrite")
-            self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)               # Initialize the file with default settings
-            with open(path, "w") as fp:
+            self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)          # Initialize the file with default settings
+            with open(self._filename, "w") as fp:
                 json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
             self._logger.critical("Unexpected error in System constructor.", exc_info = True)
@@ -59,8 +59,8 @@ class System():
             self._logger.debug("Rebuild settings file")
             if os.path.exists(self._filename) == False:                     # Check wether the file exists or not
                 self._logger.debug("Settings file doesn't exist")
-                subprocess.call("touch " + self._filename)                  # Eventually create it
-                subprocess.call("chmod 744 " + self._filename)              # Set privileges
+                subprocess.call(["touch", self._filename])                  # Eventually create it
+                subprocess.call(["chmod", "744", self._filename])           # Set privileges
                 self._settings = self._DEFAULT_SETTINGS                     # Initialize the file with default settings
             with open(self._filename, "w") as fp:
                 json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
@@ -78,7 +78,7 @@ class System():
 
         self._lock.acquire()                                                # Avoid race conditions
 
-        for item in newSettings.keys:                                       # Check each parameter and if it's valid save it
+        for item in newSettings.keys():                                     # Check each parameter and if it's valid save it
             if item in self._DEFAULT_SETTINGS.keys():                       # If this item is well known, check its validity
                 if type(newSettings[item]) == type(self._DEFAULT_SETTINGS[item]):
                     self._settings[item] = copy.deepcopy(newSettings[item])
@@ -110,10 +110,10 @@ class System():
         self._lock.acquire()
 
         try:
-            subprocess.call("mv " + self._filename + " " + newPath)         # Move the settings file
+            subprocess.call(["mv", self._filename, newPath])                # Move the settings file
             self._filename = newPath
         except Exception:
-            self._logger.error("Impossoible to move the settings file", exc_info = True)
+            self._logger.error("Impossible to move the settings file", exc_info = True)
             self._lock.release()
             return False
 

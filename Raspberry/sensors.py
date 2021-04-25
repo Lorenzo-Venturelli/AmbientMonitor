@@ -10,8 +10,7 @@ except Exception as e:
 
 class Sensors(threading.Thread):
     
-    _DEFAULT_TEMP_SENSOR_PIN = board.D26
-    _DEFAULT_SENSORS_SETTINGS = {"tempSensorPin" : _DEFAULT_TEMP_SENSOR_PIN}
+    _TEMP_SENSOR_PIN = board.D26
 
     def __init__(self, data: object, event: object, system: object, logger: object):
         if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
@@ -23,15 +22,12 @@ class Sensors(threading.Thread):
         self._system = system
         self._logger = logger
 
-        if "tempSensorPin" not in self._system.settings:
-            self._system.updateSettings(newSettings = self._DEFAULT_SENSORS_SETTINGS)
-
         # Sensors' list
-        self._sensorsList = {"T&H" : DHT22.DHT22(board.D26), "P" : BMP185.BMP085(), "L" : BH1750.BH1750(board.I2C())}
+        self._sensorsList = {"T&H" : DHT22.DHT22(self._TEMP_SENSOR_PIN), "P" : BMP185.BMP085(), "L" : BH1750.BH1750(board.I2C())}
         self._periodicClb = None                                                            # Periodic callback
         self._isRunning = True
         self._event.createEvent(eventName = "readSensors")                                  # Polling event
-        super(daemon = False)
+        super().__init__(daemon = False)
 
     
     def _executePolling(self) -> None:
@@ -41,7 +37,7 @@ class Sensors(threading.Thread):
             self._event.createEvent(eventName = "readSensors")
 
         self._event.post(eventName = "readSensors")                                         # Post the event to trigger the polling
-        self._periodicClb = threading.Timer(interval = self._system.settings["samplingSpeed"], function = self._executePolling)
+        self._periodicClb = threading.Timer(interval = (self._system.settings["samplingSpeed"] * 60), function = self._executePolling)
         self._periodicClb.start()
         self._logger.debug("Sensors polling")
         return
@@ -56,7 +52,7 @@ class Sensors(threading.Thread):
     def run(self) -> None:
         '''Periodically read sensors and prepare data'''
 
-        self._periodicClb = threading.Timer(interval = self._system.settings["samplingSpeed"], function = self._executePolling)
+        self._periodicClb = threading.Timer(interval = (self._system.settings["samplingSpeed"] * 60), function = self._executePolling)
         self._periodicClb.start()
         self._logger.debug("Sensors' thread started")
 
