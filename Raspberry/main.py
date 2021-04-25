@@ -18,6 +18,7 @@ from interfaces import System, Data, Event, InterruptHandler
 if __name__ == "__main__":
     with InterruptHandler() as sig:
         try:
+            logging.basicConfig(filename = "loggerFile.log", filemode = "w")
             logger = logging.getLogger(name = "systemLog")                      # Create the logger handler
 
             if len(sys.argv) > 1:                                               # Check inline args
@@ -47,7 +48,7 @@ if __name__ == "__main__":
                 time.sleep(1)
 
         except Exception as e:                                                  # Unexpected error, exit
-            print("Unexpected error\n" + e)
+            print("Unexpected error\n" + str(e))
 
     try:                                                                        # Stop each thread and exit
         sensorsThread.stopThread()

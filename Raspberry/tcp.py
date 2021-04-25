@@ -33,7 +33,7 @@ class TcpClient(threading.Thread):
         self._aesKey = None                                                         # AES key
         
         self._event.createEvent(eventName = "sendData")                             # Periodic TCP event to send data
-        super(daemon = False)
+        super().__init__(daemon = False)
     
     def _connect(self) -> bool:
         '''Connect to the server. Return True on success otherwise False'''
@@ -128,14 +128,14 @@ class TcpClient(threading.Thread):
         
         #Raise the event and restart the timer
         self._event.post(eventName = "sendData")
-        self._periodicClb = threading.Timer(interval = self._system.settings["sendingFreq"], function = self._sendData)
+        self._periodicClb = threading.Timer(interval = (self._system.settings["sendingFreq"] * 60), function = self._sendData)
         self._periodicClb.start()
         self._logger.debug("Send data Clb")
 
     def run(self) -> None:
         
         #Create the timer  
-        self._periodicClb = threading.Timer(interval = self._system.settings["sendingFreq"], function = self._sendData)
+        self._periodicClb = threading.Timer(interval = (self._system.settings["sendingFreq"] * 60), function = self._sendData)
         self._periodicClb.start()
         self._logger.debug("TCP thread started")
         
