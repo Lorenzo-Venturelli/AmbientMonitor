@@ -32,20 +32,24 @@ class TcpClient(threading.Thread):
         self._cltPrivKey = None                                                     # This client's RSA private key
         self._aesKey = None                                                         # AES key
         
-        self._event.createEvent(eventName = "sendData")
+        self._event.createEvent(eventName = "sendData")                             # Periodic TCP event to send data
         super(daemon = False)
     
-    def _connect(self) -> None:
-        '''Connect to the server'''
+    def _connect(self) -> bool:
+        '''Connect to the server. Return True on success otherwise False'''
 
         try:
             self._handler.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
+            self._logger.debug("TCP connected")
+            return True
         except OSError:
             self._logger.error("Impossible to connect to the TCP server")
             self._handler.close()
+            return False
         except Exception:
             self._logger.critcal("Unexpected error while connecting TCP")
             self._handler.close()
+            return False
             
     def _disconnect(self) -> None:
         '''Disconnect from the server'''
@@ -56,9 +60,9 @@ class TcpClient(threading.Thread):
     def stopThread(self) -> None:
         '''Kill this thread'''
 
-        self._isRunning = False
-        self._periodicClb.cancel()
-        self._event.post(eventName = "sendData")
+        self._isRunning = False                                             # Set the status flag
+        self._periodicClb.cancel()                                          # Stop the timer
+        self._event.post(eventName = "sendData")                            # Raise the event to unlock the thread
 
     def _handshake(self) -> bool:
         '''Execute the connection's handshake'''
@@ -116,11 +120,13 @@ class TcpClient(threading.Thread):
             self._system.updateSettings(RSA = self._system.defaultSettings["RSA"])
             return False
 
-    def _sendData(self) -> None:
-        
-        if self._event.isPresent(eventName = "sendData") == False:
+    def _sendData(self) -> None:                                    
+        '''Periodic timer callback for TCP thread. Raise sendData event'''
+
+        if self._event.isPresent(eventName = "sendData") == False:          
             self._event.createEvent(eventName = "sendData")
         
+        #Raise the event and restart the timer
         self._event.post(eventName = "sendData")
         self._periodicClb = threading.Timer(interval = self._system.settings["sendingFreq"], function = self._sendData)
         self._periodicClb.start()
@@ -128,36 +134,48 @@ class TcpClient(threading.Thread):
 
     def run(self) -> None:
         
+        #Create the timer  
         self._periodicClb = threading.Timer(interval = self._system.settings["sendingFreq"], function = self._sendData)
         self._periodicClb.start()
         self._logger.debug("TCP thread started")
         
         while True:
-            self._event.pend(eventName = "sendData")
+            self._event.pend(eventName = "sendData")                            # Wait until the event is raised
             
-            if self._isRunning == False:
+            if self._isRunning == False:                                        # Check the thread status
                 self._logger.debug("TCP thread closed")
                 break
             
-            if self._handshake() == True:
-                try:
-                    self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
-                    msg = self._handler.recv(1024)
-
-                    if CryptoHandler.AESdecrypt(key = self._aesKey, secret = msg) == self._TCP_ACK_OK:
-                        self._handler.close()
+            if self._connect() == True:                                         # Connect to the TCP server
+                if self._handshake() == True:                                   # Cryptographic handshake
+                    try:                                                        # Encrypt data and send them
+                        self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
                         
-                    else:
-                        self._handler.close()               #da gestire
-                except socket.timeout:
-                    self._handler.close()
-                    self._logger.warning("No answer from server after sending data")
-                except OSError:
-                    self._handler.close()
-                    self._logger.warning("Socket error while sending data")
-                except Exception:
-                    self._handler.close()
-                    self._logger.critcal("Unexpected error while sending data (very very unexpected)")
-                
+                        while True:                                             # Commands loop
+                            command = self._handler.recv(1024)                  # Received command
+
+                            if CryptoHandler.AESdecrypt(key = self._aesKey, secret = command) == self._TCP_ACK_OK:          # Standard acknowledge
+                                self._handler.close()                                                                       # Close connection
+                                self._data.remove(itemName = "sampledData")                                                 # Delete data because we have already sent them
+                                break
+                            else:                                                                                           # Unkown answer, close connection 
+                                self._handler.close()               #da gestire 
+                                break
+                    except socket.timeout:                                      # No answer from server
+                        self._handler.close()
+                        self._logger.warning("No answer from server after sending data")
+                    except OSError:                                             # TCP socket error 
+                        self._handler.close()
+                        self._logger.warning("Socket error while sending data")
+                    except Exception:                                           # Unkown exception (it's a very very very big pitty)
+                        self._handler.close()
+                        self._logger.critcal("Unexpected error while sending data (very very unexpected)")
+                else:
+                    self._logger.error("TCP handshake failed")
+            else:
+                self._logger.error("TCP connection failed")        
+        
+        self._logger.debug("TCP thread closed")
         return
 
+    
