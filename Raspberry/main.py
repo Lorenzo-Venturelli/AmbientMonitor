@@ -24,6 +24,8 @@ if __name__ == "__main__":
             if len(sys.argv) > 1:                                               # Check inline args
                 if sys.argv[1] == "debug":                                      # Run the probram in debug mode
                     logger.setLevel(logging.DEBUG)                              # Verbose logging
+                elif sys.argv[1] == "info":
+                    logger.setLevel(logging.info)                               # Verbose logging
                 else:
                     logger.setLevel(logging.ERROR)                              # Only error messages
             else:

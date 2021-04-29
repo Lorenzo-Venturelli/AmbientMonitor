@@ -17,7 +17,7 @@ class System():
     _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
     _DEFAULT_PATH = "./"
 
-    def __init__(self, logger: object, path: str = self._DEFAULT_PATH):
+    def __init__(self, logger: object, path: str = _DEFAULT_PATH):
         if type(path) != str or isinstance(logger, logging.Logger) == False:
             raise TypeError
 

@@ -132,6 +132,22 @@ class TcpClient(threading.Thread):
         self._periodicClb.start()
         self._logger.debug("Send data Clb")
 
+    def _send(self, data: object, byteObject: bool = False) -> None:
+
+        if type(byteObject) != bool:
+            raise TypeError
+
+        return self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = data, byteObject = byteObject))
+
+    def _receive(self) -> object:
+
+        message = self._handler.recv(1024)                                          # Receive data
+
+        if message == None or message == '' or message == b'':                      # If nothing has been received, return None
+            return None
+        
+        return CryptoHandler.AESdecrypt(key = self._aesKey, secret = self._handler.recv(1024))      # Decrypt the message
+
     def run(self) -> None:
         
         #Create the timer  
@@ -149,12 +165,16 @@ class TcpClient(threading.Thread):
             if self._connect() == True:                                         # Connect to the TCP server
                 if self._handshake() == True:                                   # Cryptographic handshake
                     try:                                                        # Encrypt data and send them
-                        self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = self._data.load(itemName = "sampledData"), byteObject = True))
+                        self._send(data = self._system.settings["UID"])         # Send UID
+                        if self._receive() != self._TCP_ACK_OK:                 # In case of error, disconnect and skip the cycle
+                            self._logger.error("Failed to send UID")
+                            self._handler.close()
+                            continue
+
+                        self._send(data = self._data.load(itemName = "sampledData"), byteObject = True)
                         
                         while True:                                             # Commands loop
-                            command = self._handler.recv(1024)                  # Received command
-
-                            if CryptoHandler.AESdecrypt(key = self._aesKey, secret = command) == self._TCP_ACK_OK:          # Standard acknowledge
+                            if self._receive() == self._TCP_ACK_OK:             # Standard acknowledge
                                 self._handler.close()                                                                       # Close connection
                                 self._data.remove(itemName = "sampledData")                                                 # Delete data because we have already sent them
                                 break
