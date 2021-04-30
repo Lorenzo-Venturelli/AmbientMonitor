@@ -18,7 +18,7 @@ from interfaces import System, Data, Event, InterruptHandler
 if __name__ == "__main__":
     with InterruptHandler() as sig:
         try:
-            logging.basicConfig(filename = "loggerFile.log", filemode = "w")
+            logging.basicConfig(filename = "../Files/loggerFile.log", filemode = "w")
             logger = logging.getLogger(name = "systemLog")                      # Create the logger handler
 
             if len(sys.argv) > 1:                                               # Check inline args
@@ -40,13 +40,13 @@ if __name__ == "__main__":
             tcpThread = tcp.TcpClient(data = dataInterface, event = eventInterface, system = systemInterface, logger = logger)
 
             # Store the threads' objects so that they'll be available program-wide
-            dataInterface.store(itemName = "threads", item = (sensorsThread, tcpThread), itemType = "tuple")
+            dataInterface.store(itemName = "threads", item = (sensorsThread, tcpThread), itemType = "tuple", storeByReference = True)
 
             # Start the threads
             sensorsThread.start()
             tcpThread.start()
 
-            while True:                                                         # Sleep until a keyboard interrupt occur
+            while sig.interrupted == False:                                     # Sleep until a keyboard interrupt occur
                 time.sleep(1)
 
         except Exception as e:                                                  # Unexpected error, exit
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         sensorsThread.join()
         tcpThread.stopThread()
         tcpThread.join()
-        sys.exit("Program closed gracefully")
     except Exception as e:                                                      # Unknown errors occurred                                                               
-        print(e)
-        sys.exit("Program closed with errors")
+        sys.exit(1)
+
+    sys.exit(0)

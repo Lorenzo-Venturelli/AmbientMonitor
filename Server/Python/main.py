@@ -6,7 +6,7 @@ if arguments > 0:
     if sys.argv[1] == 'debug':
         import ptvsd
         # Allow other computers to attach to ptvsd at this IP address and port.
-        ptvsd.enable_attach(address=("192.168.1.117", 3000))
+        ptvsd.enable_attach(address=("10.0.0.4", 3000))
         # Pause the program until a remote debugger is attached	
         ptvsd.wait_for_attach()
         
@@ -17,7 +17,7 @@ import tcp
 if __name__ == "__main__":
     with InterruptHandler() as sig:
         try:
-            logging.basicConfig(filename = "loggerFile.log", filemode = "w")
+            logging.basicConfig(filename = "../Files/loggerFile.log", filemode = "w")
             logger = logging.getLogger(name = "systemLog")                      # Create the logger handler
 
             if len(sys.argv) > 1:                                               # Check inline args
@@ -43,16 +43,18 @@ if __name__ == "__main__":
             # Start the threads
             serverThread.start()
 
-            while True:                                                         # Sleep until a keyboard interrupt occur
+            while sig.interrupted == False:                                     # Sleep until a keyboard interrupt occur
                 time.sleep(1)
 
         except Exception as e:
-            print("Unexpected error\n" + e)
+            print("Unexpected error\n")
+            print(e)
     
     try:
         serverThread.stopThread()
         serverThread.join()
-        sys.exit("Program closed gracefully")
     except Exception as e:
         print(e)
-        sys.exit("Program closed with errors")
+        sys.exit(1)
+
+    sys.exit(0)

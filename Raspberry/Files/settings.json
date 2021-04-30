@@ -1,0 +1,10 @@
+{
+    "City": "Modena",
+    "Country": "IT",
+    "RSA": 1024,
+    "UID": "0000000000",
+    "samplingSpeed": 1,
+    "sendingFreq": 10,
+    "serverAddress": "www.ambientmonitor.page",
+    "serverPort": 1234
+}

@@ -30,7 +30,8 @@ class TcpServer(threading.Thread):
     def _openServer(self) -> bool:
         '''Open a server side endpoint. If this is not possible, kill this thread'''
         try:
-            self._asyncLoop = asyncio.get_event_loop()
+            self._asyncLoop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._asyncLoop)
             self._asyncApp = asyncio.start_server(self._handle_connection, self._system.settings["serverAddress"], self._system.settings["serverPort"], loop = self._asyncLoop)
             self._server = self._asyncLoop.run_until_complete(self._asyncApp)
             return True
@@ -140,5 +141,5 @@ class TcpServer(threading.Thread):
                 if self._openServer() == True:                                      # Try to open the async server
                     self._asyncLoop.run_forever()                                   # Server opened, start to listen
                 else:                                                               # Impossible to open the server
-                    time.sleep(secs = 120)                                          # Wait 2 minutes and then try again
+                    time.sleep(120)                                                 # Wait 2 minutes and then try again
                     continue

@@ -3,7 +3,7 @@ from interfaces import Data, Event, CryptoHandler, System
 
 class TcpClient(threading.Thread):
 
-    _DEFAULT_TCP_SETTINGS = {"serverAddress" : "www.ambientmonitor.page", "serverPort" : 1234, "RSA" : 1024}
+    _DEFAULT_TCP_SETTINGS = {"serverAddress" : "ssh.ambientmonitor.page", "serverPort" : 1234, "RSA" : 1024}
     _HANDSHAKE_REQUEST = b"199"
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
@@ -43,7 +43,7 @@ class TcpClient(threading.Thread):
             self._logger.debug("TCP connected")
             return True
         except OSError:
-            self._logger.error("Impossible to connect to the TCP server")
+            self._logger.error("Impossible to connect to the TCP server", exc_info = True)
             self._handler.close()
             return False
         except Exception:

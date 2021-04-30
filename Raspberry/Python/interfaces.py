@@ -14,10 +14,10 @@ except ImportError:
 
 class System():
 
-    _DEFAULT_SETTINGS = {}
-    _DEFAULT_PATH = "./"
+    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
+    _DEFAULT_PATH = "../Files/"
 
-    def __init__(self, logger: object, path: str = System._DEFAULT_PATH):
+    def __init__(self, logger: object, path: str = _DEFAULT_PATH):
         if type(path) != str or isinstance(logger, logging.Logger) == False:
             raise TypeError
 
@@ -31,22 +31,22 @@ class System():
         self._lock = threading.Lock()
 
         try:
-            if os.path.exists(path) == False:                               # Check wether the file exists or not
+            if os.path.exists(self._filename) == False:                     # Check wether the file exists or not
                 self._logger.debug("Settings file doesn't exist")
-                subprocess.call("touch " + path)                            # Eventually create it
-                subprocess.call("chmod 744 " + path)                        # Set privileges
-                self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)    # Initialize the file with default settings
-                with open(path, "w") as fp:
-                    json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+                subprocess.call(["touch", self._filename])                  # Eventually create it
+                subprocess.call(["chmod", "744",  self._filename])          # Set privileges
+                self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)      # Initialize the file with default settings
+                with open(self._filename, "w") as fp:
+                    json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
             else:
                 self._logger.debug("Settings file exists")
-                with open(path, "r") as fp:
+                with open(self._filename, "r") as fp:
                     self._settings = json.load(fp)
         except json.JSONDecodeError:                                        # Corrupted settings file
             self._logger.error("Settings file is corrupted, overwrite")
-            self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)        # Initialize the file with default settings
-            with open(path, "w") as fp:
-                json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+            self._settings = copy.deepcopy(self._DEFAULT_SETTINGS)          # Initialize the file with default settings
+            with open(self._filename, "w") as fp:
+                json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
             self._logger.critical("Unexpected error in System constructor.", exc_info = True)
             raise e
@@ -59,11 +59,11 @@ class System():
             self._logger.debug("Rebuild settings file")
             if os.path.exists(self._filename) == False:                     # Check wether the file exists or not
                 self._logger.debug("Settings file doesn't exist")
-                subprocess.call("touch " + self._filename)                  # Eventually create it
-                subprocess.call("chmod 744 " + self._filename)              # Set privileges
-                self._settings = copy.deepcopy(System._DEFAULT_SETTINGS)    # Initialize the file with default settings
+                subprocess.call(["touch", self._filename])                  # Eventually create it
+                subprocess.call(["chmod", "744", self._filename])           # Set privileges
+                self._settings = self._DEFAULT_SETTINGS                     # Initialize the file with default settings
             with open(self._filename, "w") as fp:
-                json.dump(System._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
+                json.dump(self._DEFAULT_SETTINGS, fp, indent = 4, sort_keys = True)
         except Exception as e:                                              # Unknown exception, propagate it
             self._logger.critical("Unexpected error while rebuilding the settings file", exc_info = True)
             self._lock.release()                                            
@@ -78,7 +78,7 @@ class System():
 
         self._lock.acquire()                                                # Avoid race conditions
 
-        for item in newSettings.keys:                                       # Check each parameter and if it's valid save it
+        for item in newSettings.keys():                                     # Check each parameter and if it's valid save it
             if item in self._DEFAULT_SETTINGS.keys():                       # If this item is well known, check its validity
                 if type(newSettings[item]) == type(self._DEFAULT_SETTINGS[item]):
                     self._settings[item] = copy.deepcopy(newSettings[item])
@@ -110,10 +110,10 @@ class System():
         self._lock.acquire()
 
         try:
-            subprocess.call("mv " + self._filename + " " + newPath)         # Move the settings file
+            subprocess.call(["mv", self._filename, newPath])                # Move the settings file
             self._filename = newPath
         except Exception:
-            self._logger.error("Impossoible to move the settings file", exc_info = True)
+            self._logger.error("Impossible to move the settings file", exc_info = True)
             self._lock.release()
             return False
 
@@ -146,7 +146,7 @@ class Data():
     @property
     def supportedTypes(self):
         '''Supported value types'''
-        return copy.deepcopy(Data._SUPPORTED_TYPES)
+        return copy.deepcopy(self._SUPPORTED_TYPES)
 
     def isPresetn(self, itemName: str) -> bool:
         '''Check if an item with (itemName) is stored in this interface'''
@@ -159,16 +159,16 @@ class Data():
         else:
             return False
 
-    def store(self, itemName: str, item: object, itemType: str = "object") -> bool:
+    def store(self, itemName: str, item: object, itemType: str = "object", storeByReference: bool = False) -> bool:
         '''
         Store (item) of type (itemType) with (itemName) label.
         Verify the type and return True on success.
         '''
 
-        if type(itemName) != str or type(itemType) != str:
+        if type(itemName) != str or type(itemType) != str or type(storeByReference) != bool:
             raise TypeError
 
-        if itemType not in Data._SUPPORTED_TYPES:               # If the item type is not supported, treat this item like a generic object
+        if itemType not in self._SUPPORTED_TYPES:               # If the item type is not supported, treat this item like a generic object
             itemType = "object"
 
         if itemType == "int" and type(item) != int:
@@ -187,20 +187,23 @@ class Data():
             return False
 
         try:
-            self._lock.acquire()                                    
-            self._data[itemName] = (copy.deepcopy(item), itemType)  # Store the item
+            self._lock.acquire()
+            if storeByReference == False:                               # Store a copy of the given item
+                self._data[itemName] = (copy.deepcopy(item), itemType)  # Store the item
+            else:                                                       # Store the origina item
+                self._data[itemName] = (item, itemType)
             self._lock.release()
         except Exception:
-            self._logger.error("Impossible to store an item.", exc_info = True)
+            self._logger.error("Impossible to store an item. --> " + str(item), exc_info = True)
             self._lock.release()
             return False
 
         return True
 
-    def load(self, itemName: str) -> object:
+    def load(self, itemName: str, loadReference: bool = False) -> object:
         '''Return the item stored with (itemName) label. If this item doesn't exist, return None'''
 
-        if type(itemName) != str:
+        if type(itemName) != str or type(loadReference) != bool:
             raise TypeError
 
         if self.isPresetn(itemName = itemName) == False:
@@ -208,7 +211,10 @@ class Data():
         else:
             try:
                 self._lock.acquire()
-                item = copy.deepcopy(self._data[itemName][0])
+                if loadReference == False:                          # Return a copy of the stored item
+                    item = copy.deepcopy(self._data[itemName][0])
+                else:                                               # Return a reference to the stored item
+                    item =self._data[itemName][0]
                 self._lock.release()
             except Exception:                                       # Unexpected error, return None
                 self._logger.error("Impossible to load an item.", exc_info = True)
@@ -236,24 +242,27 @@ class Data():
             
             return True
 
-    def insertList(self, itemName: str, element: object, index: int) -> bool:
+    def insertList(self, itemName: str, element: object, index: int, storeByReference: bool = False) -> bool:
         '''
         Insert (element) into (itemName) list in (index) position.
         If the list doesn't exists, create it. If (itemName) doesn't point to a list, return False.
         '''
 
-        if type(itemName) != str or type(index) != int:
+        if type(itemName) != str or type(index) != int or type(storeByReference) != bool:
             raise TypeError
 
         if self.isPresetn(itemName = itemName) == False:                                    # The item doesn't exist
-            self.store(itemName = itemName, item = list(element), itemType = "list")        # Create the queue and insert the item
+            self.store(itemName = itemName, item = list(element), itemType = "list", storeByReference = storeByReference)   # Create the queue and insert the item
         else:                                                                               # The item exists
             if self._data[itemName][1] != "list":                                           # If it's not a list, return False
                 return False
             else:                                                                           # Insert the new element
                 try:
                     self._lock.acquire()
-                    self._data[itemName][0].append(index, copy.deepcopy(element))
+                    if storeByReference == False:
+                        self._data[itemName][0].append(index, copy.deepcopy(element))
+                    else:
+                        self._data[itemName][0].append(index, element)
                     self._lock.release()
                 except Exception:                                                           # Unexpected error
                     self._logger.error("Impossible to insert an item into a list.", exc_info = True)
@@ -262,14 +271,14 @@ class Data():
 
         return True
 
-    def getFromList(self, itemName: str, index: int, remove: bool = False) -> object:
+    def getFromList(self, itemName: str, index: int, remove: bool = False, loadReference: bool = False) -> object:
         '''
         Get the element in position (index) from the (itemName) list.
         If the list doesn't exist, (index) is not valid or (itemName) is not a list, return None.
         If (remove) is True, the element is removed from the list
         '''
 
-        if type(itemName) != str or type(index) != int or type(remove) != bool:
+        if type(itemName) != str or type(index) != int or type(remove) != bool or type(loadReference) != bool:
             raise TypeError
 
         if self.isPresetn(itemName = itemName) == False:                                    # The item doesn't exist
@@ -279,7 +288,10 @@ class Data():
         else:                                                                               # The item is a list
             try:
                 self._lock.acquire()
-                element = copy.deepcopy(self._data[itemName][0][index])                     # Get the element
+                if loadReference == False:
+                    element = copy.deepcopy(self._data[itemName][0][index])                 # Get the element
+                else:
+                    element = self._data[itemName][0][index]
                 if remove == True:                                                          # If requested, delete the element
                     del self._data[itemName][0][index]
                 self._lock.release()
@@ -293,21 +305,27 @@ class Data():
                 raise e
             return element
 
-    def insertDict(self, itemName: str, key: object, element: object) -> bool:
+    def insertDict(self, itemName: str, key: object, element: object, storeByReference: bool = False) -> bool:
         '''Insert (element) using (key) into the (itemName) dictionary. Return True on success'''
 
-        if type(itemName) != str:
+        if type(itemName) != str or type(storeByReference) != bool:
             raise TypeError
 
         if self.isPresetn(itemName = itemName) == False:                                    # Item doesn't exist, create it
-            self.store(itemName = itemName, item = {copy.deepcopy(key) : copy.deepcopy(element)}, itemType = "dict")
+            if storeByReference == False:
+                self.store(itemName = itemName, item = {copy.deepcopy(key) : copy.deepcopy(element)}, itemType = "dict", storeByReference = storeByReference)
+            else:
+                self.store(itemName = itemName, item = {copy.deepcopy(key) : element}, itemType = "dict", storeByReference = storeByReference)
         else:
             if self._data[itemName][1] != "dict":                                           # Item is not a dict, fail
                 return False
             else:
                 try:
                     self._lock.acquire()
-                    self._data[itemName][0][copy.deepcopy(key)] = copy.deepcopy(element)    # Insert the new element into item
+                    if storeByReference == False:
+                        self._data[itemName][0][copy.deepcopy(key)] = copy.deepcopy(element) # Insert the new element into item
+                    else:
+                        self._data[itemName][0][copy.deepcopy(key)] = element
                     self._lock.release()
                     return True
                 except Exception:
@@ -315,13 +333,13 @@ class Data():
                     self._lock.release()
                     return False
 
-    def getFromDict(self, itemName: str, key: object, remove: bool = False) -> object:
+    def getFromDict(self, itemName: str, key: object, remove: bool = False, loadReference: bool = False) -> object:
         '''
         Get element pointed by (key) from (itemName) dict. If remove = True the element is removed.
         If the (itemName) is not a dict, it doesn't exist or (key) doesn't exist, return None.
         '''
 
-        if type(itemName) != str or type(remove) != bool:
+        if type(itemName) != str or type(remove) != bool or type(loadReference) != bool:
             raise TypeError
 
         if self.isPresetn(itemName = itemName) == True:                                     # Item exist
@@ -329,7 +347,10 @@ class Data():
                 if key in self._data[itemName][0].keys():                                   # Key exists
                     try:
                         self._lock.acquire()
-                        element = copy.deepcopy(self._data[itemName][0][copy.deepcopy(key)])    # Get the element
+                        if loadReference == False:
+                            element = copy.deepcopy(self._data[itemName][0][copy.deepcopy(key)])    # Get the element
+                        else:
+                            element = self._data[itemName][0][copy.deepcopy(key)]
                         if remove == True:
                             del self._data[itemName][0][copy.deepcopy(key)]                     # If requested, remove this element
                         self._lock.release()
@@ -584,6 +605,7 @@ class InterruptHandler(object):
 
     def __exit__(self, type, value, tb) -> None:                        # Method called when this class' object is closed
         self.release()
+        self.interrupted = True
 
     def handler(self, signum, frame) -> None:                           # Method invoked when a system signal is received
         self.release()

@@ -1,0 +1,29 @@
+ERROR:systemLog:Impossible to store an item.
+Traceback (most recent call last):
+  File "/home/pi/Python/interfaces.py", line 191, in store
+    self._data[itemName] = (copy.deepcopy(item), itemType)  # Store the item
+  File "/usr/lib/python3.7/copy.py", line 150, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.7/copy.py", line 220, in _deepcopy_tuple
+    y = [deepcopy(a, memo) for a in x]
+  File "/usr/lib/python3.7/copy.py", line 220, in <listcomp>
+    y = [deepcopy(a, memo) for a in x]
+  File "/usr/lib/python3.7/copy.py", line 180, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+  File "/usr/lib/python3.7/copy.py", line 280, in _reconstruct
+    state = deepcopy(state, memo)
+  File "/usr/lib/python3.7/copy.py", line 150, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.7/copy.py", line 240, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+  File "/usr/lib/python3.7/copy.py", line 180, in deepcopy
+    y = _reconstruct(x, memo, *rv)
+  File "/usr/lib/python3.7/copy.py", line 280, in _reconstruct
+    state = deepcopy(state, memo)
+  File "/usr/lib/python3.7/copy.py", line 150, in deepcopy
+    y = copier(x, memo)
+  File "/usr/lib/python3.7/copy.py", line 240, in _deepcopy_dict
+    y[deepcopy(key, memo)] = deepcopy(value, memo)
+  File "/usr/lib/python3.7/copy.py", line 169, in deepcopy
+    rv = reductor(4)
+TypeError: can't pickle _thread.lock objects
