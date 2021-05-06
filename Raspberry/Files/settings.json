@@ -4,7 +4,7 @@
     "RSA": 1024,
     "UID": "0000000000",
     "samplingSpeed": 1,
-    "sendingFreq": 10,
-    "serverAddress": "www.ambientmonitor.page",
+    "sendingFreq": 2,
+    "serverAddress": "ssh.ambientmonitor.page",
     "serverPort": 1234
 }

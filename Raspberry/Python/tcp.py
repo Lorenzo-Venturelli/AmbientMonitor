@@ -1,4 +1,4 @@
-import socket, threading, logging
+import socket, threading, logging, json
 from interfaces import Data, Event, CryptoHandler, System
 
 class TcpClient(threading.Thread):
@@ -17,9 +17,6 @@ class TcpClient(threading.Thread):
         self._data = data
         self._system = system
         self._logger = logger
-        
-        self._handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)           # Create the socket endpoint
-        self._handler.settimeout(5.0)                                               # Timeout after 5 seconds
 
         for item in self._DEFAULT_TCP_SETTINGS.keys():                              # If this thread's settings don't exist, create them from default ones
             if item not in self._system.settings:
@@ -39,6 +36,8 @@ class TcpClient(threading.Thread):
         '''Connect to the server. Return True on success otherwise False'''
 
         try:
+            self._handler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)           # Create the socket endpoint
+            self._handler.settimeout(5.0)                                               # Timeout after 5 seconds
             self._handler.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
             self._logger.debug("TCP connected")
             return True
@@ -117,7 +116,7 @@ class TcpClient(threading.Thread):
             self._cltPubKey = None
             self._cltPrivKey = None
             self._aesKey = None
-            self._system.updateSettings(RSA = self._system.defaultSettings["RSA"])
+            self._system.updateSettings(newSettings = self._DEFAULT_TCP_SETTINGS)
             return False
 
     def _sendData(self) -> None:                                    
@@ -139,14 +138,17 @@ class TcpClient(threading.Thread):
 
         return self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = data, byteObject = byteObject))
 
-    def _receive(self) -> object:
+    def _receive(self, byteObject: bool = False) -> object:
 
-        message = self._handler.recv(1024)                                          # Receive data
+        if type(byteObject) != bool:
+            raise TypeError
 
-        if message == None or message == '' or message == b'':                      # If nothing has been received, return None
+        message = self._handler.recv(1024)                                                                      # Receive data
+
+        if message == None or message == '' or message == b'':                                                  # If nothing has been received, return None
             return None
         
-        return CryptoHandler.AESdecrypt(key = self._aesKey, secret = self._handler.recv(1024))      # Decrypt the message
+        return CryptoHandler.AESdecrypt(key = self._aesKey, secret = message, byteObject = byteObject)          # Decrypt the message
 
     def run(self) -> None:
         
@@ -166,15 +168,16 @@ class TcpClient(threading.Thread):
                 if self._handshake() == True:                                   # Cryptographic handshake
                     try:                                                        # Encrypt data and send them
                         self._send(data = self._system.settings["UID"])         # Send UID
-                        if self._receive() != self._TCP_ACK_OK:                 # In case of error, disconnect and skip the cycle
+                        if self._receive(byteObject = True) != self._TCP_ACK_OK:        # In case of error, disconnect and skip the cycle
                             self._logger.error("Failed to send UID")
                             self._handler.close()
                             continue
 
-                        self._send(data = self._data.load(itemName = "sampledData"), byteObject = True)
+                        sensorsData = json.dumps(self._data.load(itemName = "sampledData"))
+                        self._send(data = sensorsData)
                         
-                        while True:                                             # Commands loop
-                            if self._receive() == self._TCP_ACK_OK:             # Standard acknowledge
+                        while True:                                                                 # Commands loop
+                            if self._receive(byteObject = True) == self._TCP_ACK_OK:                # Standard acknowledge
                                 self._handler.close()                                                                       # Close connection
                                 self._data.remove(itemName = "sampledData")                                                 # Delete data because we have already sent them
                                 break
@@ -189,9 +192,11 @@ class TcpClient(threading.Thread):
                         self._logger.warning("Socket error while sending data")
                     except Exception:                                           # Unkown exception (it's a very very very big pitty)
                         self._handler.close()
-                        self._logger.critcal("Unexpected error while sending data (very very unexpected)")
+                        self._logger.critical("Unexpected error while sending data (very very unexpected)", exc_info = True)
                 else:
                     self._logger.error("TCP handshake failed")
+
+                self._disconnect()
             else:
                 self._logger.error("TCP connection failed")        
         

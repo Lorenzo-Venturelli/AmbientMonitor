@@ -1,4 +1,4 @@
-import threading, socket, logging, time, asyncio
+import threading, socket, logging, time, asyncio, json
 from interfaces import System, Data, Event, CryptoHandler
 
 class TcpServer(threading.Thread):
@@ -24,7 +24,7 @@ class TcpServer(threading.Thread):
 
         self._isRunning = True
 
-        (self._srvPrivKey, self._srvPubKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
+        (self._srvPubKey, self._srvPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
         super().__init__(daemon = False)
 
     def _openServer(self) -> bool:
@@ -46,24 +46,24 @@ class TcpServer(threading.Thread):
             writer.write(self._HANDSHAKE_REQUEST)                                           # Send handshake request to the client
             await writer.drain()
             
-            if await reader.read() == self._TCP_ACK_OK:                                     # Client has got the request and it's ready
+            if await asyncio.wait_for(reader.read(1024), timeout = 5) == self._TCP_ACK_OK:  # Client has got the request and it's ready
 
                 writer.write(str(self._system.settings["RSA"]).encode())                    # Send the RSA key length. This connection will use this key length
                 await writer.drain()
 
-                if await reader.read() == self._TCP_ACK_OK:                                 # Key length received and adopted
-                    writer.write(CryptoHandler.exportRSApub(pubkey = self._srvPubKey))      # Send the server's RSA public key
+                if await asyncio.wait_for(reader.read(1024), timeout = 5) == self._TCP_ACK_OK:  # Key length received and adopted
+                    writer.write(CryptoHandler.exportRSApub(pubkey = self._srvPubKey))          # Send the server's RSA public key
                     await writer.drain()
 
                     # Receive the AES key and use the server's private RSA key to decrypt is
-                    aesKey = CryptoHandler.RSAdecrypt(privkey = self._srvPrivKey, secret = await reader.read(), skipDecoding = True)
+                    aesKey = CryptoHandler.RSAdecrypt(privkey = self._srvPrivKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), skipDecoding = True)
 
                     if aesKey != None:                                                      # AES key received and successfully decrypted
                         writer.write(self._TCP_ACK_OK)                                      # Send ACK
                         await writer.drain()
 
                         # Receive the client RSA public key and use the AES key to decrypt it
-                        cltPubKey = CryptoHandler.AESdecrypt(key = aesKey, secret = await reader.read(), byteObject = True)
+                        cltPubKey = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = True)
                         
                         if cltPubKey != None:                                               # If the RSA public key is successfully received
                             cltPubKey = CryptoHandler.importRSApub(PEMfile = cltPubKey)     # Import it
@@ -84,6 +84,9 @@ class TcpServer(threading.Thread):
             # Something went wrong, handshake failed
             self._logger.warning("Handshake failed for client " + str(writer.get_extra_info("peername")))
             return (None, None)
+        except asyncio.TimeoutError:                                                        # At some point, client didn't send anythingù
+            self._logger.warning("Timeout connection in handshake for client " + str(writer.get_extra_info("peername")))
+            return (None, None)
         except Exception:                                                                   # An error occurred, handshake failed
             self._logger.error("Error occurred during TCP handshake", exc_info = True)
             return (None, None)
@@ -95,11 +98,12 @@ class TcpServer(threading.Thread):
 
         if cltPubKey != None and aesKey != None:
             try:
-                clientUID = CryptoHandler.AESdecrypt(key = aesKey, secret = await reader.read(), byteObject = False)
+                clientUID = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = False)
                 if len(clientUID) == 10:
                     writer.write(CryptoHandler.AESencrypt(key = aesKey, raw = self._TCP_ACK_OK, byteObject = True))
                     await writer.drain()
-                    sensorData = CryptoHandler.AESdecrypt(key = aesKey, secret = await reader.read(), byteObject = True)
+                    sensorData = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = True)
+                    sensorData = json.loads(sensorData)
                     if type(sensorData) == dict:
                         # passare clientUID e sensorData alla classe SQL per inserimento del DB
                         # Da introdurre loop per invio comandi prima di mandare l'ok che poi chiude la connessione
@@ -116,7 +120,12 @@ class TcpServer(threading.Thread):
                     await writer.wait_closed()
                     self._logger.debug("Connection closed with client " + str(writer.get_extra_info("peername")))
                     return
-            except Exception:
+            except asyncio.TimeoutError:                        # At some point, the client didn't responde, close the connection
+                self._logger.warning("Timeout connection for client " + str(writer.get_extra_info("peername")))
+                writer.close()
+                await writer.wait_closed()
+                return
+            except Exception:                                   # Unknown error occurred, close the connection
                 self._logger.error("Error occurred while talking with client " + str(writer.get_extra_info("peername")), exc_info = True)
                 writer.close()
                 await writer.wait_closed()

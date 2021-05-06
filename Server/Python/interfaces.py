@@ -495,10 +495,10 @@ class CryptoHandler():
         return key
 
     @classmethod
-    def AESencrypt(cls, key: str, raw: object, byteObject: bool = False):
+    def AESencrypt(cls, key: object, raw: object, byteObject: bool = False):
         '''Encrypt a plain message (raw) with (key) using AES-128'''
 
-        if type(key) != str or type(byteObject) != bool:
+        if type(byteObject) != bool:
             raise TypeError
 
         try:
@@ -517,10 +517,10 @@ class CryptoHandler():
         return secret
 
     @classmethod
-    def AESdecrypt(cls, key: str, secret: object, byteObject: bool = False):
+    def AESdecrypt(cls, key: object, secret: object, byteObject: bool = False):
         '''Decrypt a secret message (secret) with (key) using AES-128'''
 
-        if type(key) != str or type(byteObject) != bool:
+        if type(byteObject) != bool:
             raise TypeError
 
         try:
