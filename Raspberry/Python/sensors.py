@@ -63,16 +63,24 @@ class Sensors(threading.Thread):
                 self._logger.debug("Sensors' thread closed")
                 return
 
-            newData = dict()   
+            newData = dict()
+            success = False
+
+            while success == False:                                                         # RuntimeErrors are frequent with these sensors, keep reading until we have a success
+                try:
+                    # Read data from sensors
+                    newData["pressure"] = self._sensorsList["P"].read_pressure()
+                    newData["temperature"] = self._sensorsList["T&H"].temperature
+                    newData["humidity"] = self._sensorsList["T&H"].humidity
+                    newData["Ligth"] = self._sensorsList["L"].lux
+                    success = True
+                except RuntimeError:                                                        # Just a silly runtime error
+                    self._logger.debug("RuntimeError while reading sensors")
+                except Exception:                                                           # Unexpected error, stop this reading 
+                    self._logger.error("Sensors read failed", exc_info = True)
+                    break
             
-            try:
-                # Read data from sensors
-                newData["pressure"] = self._sensorsList["P"].read_pressure()
-                newData["temperature"] = self._sensorsList["T&H"].temperature
-                newData["humidity"] = self._sensorsList["T&H"].humidity
-                newData["Ligth"] = self._sensorsList["L"].lux
-            except Exception:                                                               # In case of errors abort this reading and go back waitig
-                self._logger.error("Sensors read failed", exc_info = True)
+            if success == False:                                                            # If the reading has been aborted, skip this iteration
                 continue
 
             # Try to save these data. If something happen, recreate the item into Data interface
@@ -80,6 +88,7 @@ class Sensors(threading.Thread):
                 self._data.remove(itemName = "sampledData")
                 self._data.store(itemName = "sampledData", item = newData, itemType = "dict")
 
+            self._data.store(itemName = "dataReady", item = True, itemType = "bool")
             del newData                                                                     # Delete this temporary dict, it's useless
 
 

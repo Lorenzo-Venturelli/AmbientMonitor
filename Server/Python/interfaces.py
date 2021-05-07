@@ -133,7 +133,7 @@ class System():
         return copy.deepcopy(self._DEFAULT_SETTINGS)
 
 class Data():
-    _SUPPORTED_TYPES = ["int", "float", "str", "tuple", "list", "dict", "object", "func"]
+    _SUPPORTED_TYPES = ["int", "float", "bool", "str", "tuple", "list", "dict", "object", "func"]
 
     def __init__(self, logger: object):
         if isinstance(logger, logging.Logger) == False:
@@ -148,7 +148,7 @@ class Data():
         '''Supported value types'''
         return copy.deepcopy(self._SUPPORTED_TYPES)
 
-    def isPresetn(self, itemName: str) -> bool:
+    def isPresent(self, itemName: str) -> bool:
         '''Check if an item with (itemName) is stored in this interface'''
 
         if type(itemName) != str:
@@ -174,6 +174,8 @@ class Data():
         if itemType == "int" and type(item) != int:
             return False
         if itemType == "float" and type(item) != float:
+            return False
+        if itemType == "bool" and type(item) != bool:
             return False
         if itemType == "str" and type(item) != str:
             return False
@@ -206,7 +208,7 @@ class Data():
         if type(itemName) != str or type(loadReference) != bool:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == False:
+        if self.isPresent(itemName = itemName) == False:
             return None
         else:
             try:
@@ -228,7 +230,7 @@ class Data():
         if type(itemName) != str:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == False:            # The item doesn't exist
+        if self.isPresent(itemName = itemName) == False:            # The item doesn't exist
             return True
         else:                                                       # The item exists
             try:
@@ -251,7 +253,7 @@ class Data():
         if type(itemName) != str or type(index) != int or type(storeByReference) != bool:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == False:                                    # The item doesn't exist
+        if self.isPresent(itemName = itemName) == False:                                    # The item doesn't exist
             self.store(itemName = itemName, item = list(element), itemType = "list", storeByReference = storeByReference)   # Create the queue and insert the item
         else:                                                                               # The item exists
             if self._data[itemName][1] != "list":                                           # If it's not a list, return False
@@ -281,7 +283,7 @@ class Data():
         if type(itemName) != str or type(index) != int or type(remove) != bool or type(loadReference) != bool:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == False:                                    # The item doesn't exist
+        if self.isPresent(itemName = itemName) == False:                                    # The item doesn't exist
             return None
         elif self._data[itemName][1] != "list":                                             # The item is not a list
             return None
@@ -311,7 +313,7 @@ class Data():
         if type(itemName) != str or type(storeByReference) != bool:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == False:                                    # Item doesn't exist, create it
+        if self.isPresent(itemName = itemName) == False:                                    # Item doesn't exist, create it
             if storeByReference == False:
                 self.store(itemName = itemName, item = {copy.deepcopy(key) : copy.deepcopy(element)}, itemType = "dict", storeByReference = storeByReference)
             else:
@@ -342,7 +344,7 @@ class Data():
         if type(itemName) != str or type(remove) != bool or type(loadReference) != bool:
             raise TypeError
 
-        if self.isPresetn(itemName = itemName) == True:                                     # Item exist
+        if self.isPresent(itemName = itemName) == True:                                     # Item exist
             if self._data[itemName][1] == "dict":                                           # Item is a dict
                 if key in self._data[itemName][0].keys():                                   # Key exists
                     try:
@@ -360,7 +362,7 @@ class Data():
                         self._lock.release()
                         return None
         
-        return None     
+        return None                                                                         # Operation not completed
 
 class Event():
 

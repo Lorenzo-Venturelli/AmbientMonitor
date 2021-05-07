@@ -164,13 +164,15 @@ class TcpClient(threading.Thread):
                 self._logger.debug("TCP thread closed")
                 break
             
-            if self._connect() == True:                                         # Connect to the TCP server
-                if self._handshake() == True:                                   # Cryptographic handshake
-                    try:                                                        # Encrypt data and send them
-                        self._send(data = self._system.settings["UID"])         # Send UID
+            if self._data.load(itemName = "dataReady") != True:                 # Check if there is something to send, otherwise skip this iteration
+                continue
+
+            if self._connect() == True:                                                 # Connect to the TCP server
+                if self._handshake() == True:                                           # Cryptographic handshake
+                    try:                                                                # Encrypt data and send them
+                        self._send(data = self._system.settings["UID"])                 # Send UID
                         if self._receive(byteObject = True) != self._TCP_ACK_OK:        # In case of error, disconnect and skip the cycle
                             self._logger.error("Failed to send UID")
-                            self._handler.close()
                             continue
 
                         sensorsData = json.dumps(self._data.load(itemName = "sampledData"))
@@ -178,25 +180,22 @@ class TcpClient(threading.Thread):
                         
                         while True:                                                                 # Commands loop
                             if self._receive(byteObject = True) == self._TCP_ACK_OK:                # Standard acknowledge
-                                self._handler.close()                                                                       # Close connection
                                 self._data.remove(itemName = "sampledData")                                                 # Delete data because we have already sent them
+                                self._data.store(itemName = "dataReady", item = False, itemType = "bool")                   # Update status flag
                                 break
                             else:                                                                                           # Unkown answer, close connection 
-                                self._handler.close()               #da gestire 
+                                self._logger.warning("Unknown answer from the TCP server")
                                 break
-                    except socket.timeout:                                      # No answer from server
-                        self._handler.close()
+                    except socket.timeout:                                              # No answer from server
                         self._logger.warning("No answer from server after sending data")
-                    except OSError:                                             # TCP socket error 
-                        self._handler.close()
+                    except OSError:                                                     # TCP socket error 
                         self._logger.warning("Socket error while sending data")
-                    except Exception:                                           # Unkown exception (it's a very very very big pitty)
-                        self._handler.close()
+                    except Exception:                                                   # Unkown exception (it's a very very very big pitty)
                         self._logger.critical("Unexpected error while sending data (very very unexpected)", exc_info = True)
                 else:
                     self._logger.error("TCP handshake failed")
 
-                self._disconnect()
+                self._disconnect()                                                      # Close the TCP connection
             else:
                 self._logger.error("TCP connection failed")        
         

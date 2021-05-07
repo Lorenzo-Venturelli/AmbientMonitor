@@ -38,7 +38,7 @@ if __name__ == "__main__":
             serverThread = tcp.TcpServer(data = dataInterface, event = eventInterface, system = systemInterface, logger = logger)
 
             # Store the threads' objects so that they'll be available program-wide
-            dataInterface.store(itemName = "threads", item = (serverThread), itemType = "tuple")
+            dataInterface.store(itemName = "threads", item = (serverThread), itemType = "tuple", storeByReference = True)
 
             # Start the threads
             serverThread.start()

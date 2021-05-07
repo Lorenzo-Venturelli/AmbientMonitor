@@ -24,6 +24,11 @@ class TcpServer(threading.Thread):
 
         self._isRunning = True
 
+        # Asyncio objects
+        self._server = None
+        self._asyncLoop = None
+        self._asyncApp = None
+
         (self._srvPubKey, self._srvPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
         super().__init__(daemon = False)
 
@@ -94,6 +99,7 @@ class TcpServer(threading.Thread):
     async def _handle_connection(self, reader, writer) -> None:
         '''Handle a TCP client connection'''
 
+        time.sleep(0.1)                                                                     # Small delay to let the client sync
         (cltPubKey, aesKey) = await self._handshake(reader, writer)
 
         if cltPubKey != None and aesKey != None:
@@ -138,17 +144,30 @@ class TcpServer(threading.Thread):
 
     def stopThread(self) -> None:
         '''Close the server endpoint'''
-        self._isRunning = False
-        self._asyncLoop.stop()
+        self._isRunning = False                                                     # Update the status flag
+        self._asyncLoop.stop()                                                      # Stop the async loop. This won't wake up the system so let's fake a connection
+
+        # The async loop is stopped so this connection will wake up the async ThreadPoolExecutor which will then terminate
+        fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
+        fakeClient.close()
+
+        return
 
     def run(self) -> None:
         while True:
             if self._isRunning == False:                                            # Check the thread status
+                try:
+                    self._server.close()                                            # Close the server coroutine
+                    self._asyncLoop.run_until_complete(self._server.wait_closed())  # Wait for it's termination
+                except Exception:                                                   # Something went wrong
+                    self._logger.critical("Error occurred while closing the TCP server async loop", exc_info = True)
+
                 self._logger.debug("TCP Server closed")                             # Thread is dead, leave this function
                 return
             else:                                                                   # Thread is alive
                 if self._openServer() == True:                                      # Try to open the async server
-                    self._asyncLoop.run_forever()                                   # Server opened, start to listen
+                    self._asyncLoop.run_forever()                                   # In case of success, wait here the closure
                 else:                                                               # Impossible to open the server
                     time.sleep(120)                                                 # Wait 2 minutes and then try again
                     continue
