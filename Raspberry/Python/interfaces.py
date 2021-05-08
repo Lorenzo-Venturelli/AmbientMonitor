@@ -14,7 +14,7 @@ except ImportError:
 
 class System():
 
-    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 2, "UID" : "0000000000"}
+    _DEFAULT_SETTINGS = {"Country" : "IT", "City" : "Modena", "samplingSpeed" : 1, "sendingFreq" : 10, "UID" : "0000000000"}
     _DEFAULT_PATH = "../Files/"
 
     def __init__(self, logger: object, path: str = _DEFAULT_PATH):

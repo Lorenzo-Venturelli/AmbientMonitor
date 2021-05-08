@@ -69,10 +69,10 @@ class Sensors(threading.Thread):
             while success == False:                                                         # RuntimeErrors are frequent with these sensors, keep reading until we have a success
                 try:
                     # Read data from sensors
-                    newData["pressure"] = self._sensorsList["P"].read_pressure()
-                    newData["temperature"] = self._sensorsList["T&H"].temperature
-                    newData["humidity"] = self._sensorsList["T&H"].humidity
-                    newData["Ligth"] = self._sensorsList["L"].lux
+                    newData["pressure"] = int(self._sensorsList["P"].read_pressure())
+                    newData["temperature"] = round(self._sensorsList["T&H"].temperature, 1)
+                    newData["humidity"] = round(self._sensorsList["T&H"].humidity, 1)
+                    newData["Ligth"] = round(self._sensorsList["L"].lux, 3)
                     success = True
                 except RuntimeError:                                                        # Just a silly runtime error
                     self._logger.debug("RuntimeError while reading sensors")

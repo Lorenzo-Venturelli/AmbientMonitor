@@ -1,5 +1,6 @@
 import threading, socket, logging, time, asyncio, json
 from interfaces import System, Data, Event, CryptoHandler
+from db import MySQL
 
 class TcpServer(threading.Thread):
 
@@ -17,6 +18,7 @@ class TcpServer(threading.Thread):
         self._data = data
         self._system = system
         self._logger = logger
+        self._db = MySQL(system = system, logger = logger)
 
         for item in self._DEFAULT_TCP_SETTINGS.keys():                              # If this thread's settings don't exist, create them from default ones
             if item not in self._system.settings:
@@ -111,10 +113,9 @@ class TcpServer(threading.Thread):
                     sensorData = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = True)
                     sensorData = json.loads(sensorData)
                     if type(sensorData) == dict:
-                        # passare clientUID e sensorData alla classe SQL per inserimento del DB
                         # Da introdurre loop per invio comandi prima di mandare l'ok che poi chiude la connessione
-                        print("UID: " + str(clientUID))
-                        print(sensorData)
+                        # Create a new task in background to insert data into the DB without blocking
+                        self._asyncLoop.create_task(self._db.insertData(tableName = "Recordings", data = {"UID" : clientUID, "values" : sensorData}))
                         writer.write(CryptoHandler.AESencrypt(key = aesKey, raw = self._TCP_ACK_OK, byteObject = True))
                         await writer.drain()
                     else:
@@ -145,12 +146,14 @@ class TcpServer(threading.Thread):
     def stopThread(self) -> None:
         '''Close the server endpoint'''
         self._isRunning = False                                                     # Update the status flag
-        self._asyncLoop.stop()                                                      # Stop the async loop. This won't wake up the system so let's fake a connection
 
-        # The async loop is stopped so this connection will wake up the async ThreadPoolExecutor which will then terminate
-        fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
-        fakeClient.close()
+        if self._asyncLoop != None:                                                 # If the async loop already exists
+            self._asyncLoop.stop()                                                  # Stop the async loop. This won't wake up the system so let's fake a connection
+
+            # The async loop is stopped so this connection will wake up the async ThreadPoolExecutor which will then terminate
+            fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
+            fakeClient.close()
 
         return
 
@@ -166,6 +169,17 @@ class TcpServer(threading.Thread):
                 self._logger.debug("TCP Server closed")                             # Thread is dead, leave this function
                 return
             else:                                                                   # Thread is alive
+                if self._db.status == False:                                        # Check the DB handler status
+                    if self._db.open() == False:                                    # If it was closed, try to open it
+                        self._logger.critical("Fatal error: impossible to open DB") # In case of failure, the whole program is broken
+                        self.stopThread()
+                        continue
+
+                if asyncio.run(self._db.createTable(tableName = "Recordings")) == False:         # Prepare the tables. In case of failure we can't go on
+                    self._logger.critical("Fatal error: impossible to create the Recordings table into DB")
+                    self.stopThread()
+                    continue
+                
                 if self._openServer() == True:                                      # Try to open the async server
                     self._asyncLoop.run_forever()                                   # In case of success, wait here the closure
                 else:                                                               # Impossible to open the server
