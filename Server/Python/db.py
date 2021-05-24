@@ -1,4 +1,5 @@
 import logging, sys, time, json, copy, asyncio
+from typing import Type
 from interfaces import System
 try:
     import mysql.connector
@@ -9,7 +10,7 @@ except ImportError:
 class MySQL:
 
     _DEFAULT_SQL_SETTINGS = {"host_db" : "localhost", "user_db" : "dbmanager", "password_db" : "Trattoreventurelli0406!", "name_db" : "ambientmonitordb"}
-    _SUPPORTED_DB_TABLES = ["Recordings"]
+    _SUPPORTED_DB_TABLES = ["Recordings", "Devices"]
     
     def __init__(self, system: object, logger : object):
         
@@ -123,8 +124,9 @@ class MySQL:
 
         try:
             if tableName == self._SUPPORTED_DB_TABLES[0]:           # Main table to store all the received data as they are
-                self._cursor.execute("CREATE TABLE Recordings (timestamp INT NOT NULL, UID INT NOT NULL, Pressure DECIMAL NOT NULL, Temperature DECIMAL NOT NULL, Humidity DECIMAL NOT NULL, Ligth DECIMAL NOT NULL, PRIMARY KEY (timestamp, UID))")
-
+                self._cursor.execute("CREATE TABLE Recordings (timestamp INT NOT NULL, UID BIGINT NOT NULL, Pressure DECIMAL NOT NULL, Temperature DECIMAL NOT NULL, Humidity DECIMAL NOT NULL, Ligth DECIMAL NOT NULL, PRIMARY KEY (timestamp, UID))")
+            elif tableName == self._SUPPORTED_DB_TABLES[1]:
+                self._cursor.execute("CREATE TABLE Devices (UID BIGINT NOT NULL, Country VARCHAR[4] NOT NULL, City VARCHAR[255], PRIMARY KEY (UID))")
             return True
         except Exception:
             self._logger.error("Failed to create the table " + tableName)
@@ -157,7 +159,7 @@ class MySQL:
                 # Write the query
                 query = "INSERT INTO Recordings VALUES (%s, %s, %s, %s, %s, %s)"
                 
-                # For each element into data, create a tuple for execute the query and execute it
+                # For each element (a single recording from "UID" device), execute the query
                 for timestamp in data["values"].keys():
                     try:
                         val = (str(timestamp), str(data["UID"]), str(data["values"][timestamp]["pressure"]), str(data["values"][timestamp]["temperature"]), str(data["values"][timestamp]["humidity"]), str(data["values"][timestamp]["Ligth"]))
@@ -172,3 +174,60 @@ class MySQL:
 
                 self._handler.commit()                                                      # Commit changes to the DB to save them
                 return True
+        elif tableName == self._SUPPORTED_DB_TABLES[1]:
+            # Write the query
+            query = "INSERT INTO Devices VALUES (%s, %s, %s)"
+
+            # For each element (a single device), execute the query
+            for uid in data.keys():
+                try:
+                    val = (str(uid), str(data[uid]["Country"]), str(data[uid]["City"]))
+                except Exception:                                                           # Something in the data structure is wrong, this line is invalid, skip to the next one
+                    continue
+
+                try:
+                    self._cursor.execute(query, val)
+                except Exception:
+                    self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
+                    continue
+            
+            self._handler.commit()
+            return True
+        else:                                                                               # Table not supported
+            return False
+
+    async def readData(self, tableName: str, options: dict = {}) -> dict:
+        '''
+        Read data from a table. Particular constraints can be specified with (options)
+        Return a dictionary containing the result.
+        '''
+
+        if type(tableName) != str or type(options) != dict:
+            raise TypeError
+
+        if tableName not in self._SUPPORTED_DB_TABLES:                                      # Requested table is not supported
+            self._logger.debug("Table " + tableName + " is not supported")
+            raise Exception("Table " + str(tableName) + " not supported")
+        else:
+            if await self.createTable(tableName = tableName) == False:                      # Try to create the table to avoid errors
+                return False
+
+        if tableName == self._SUPPORTED_DB_TABLES[0]:                                       # Recordings table
+            result = dict()
+            if options == dict():                                                           # No options are provided
+                query = "SELECT * FROM Recordings"                                          # Let's read the entire table
+
+                try:
+                    self._cursor.execute(query)
+                    res = self._cursor.fetchall()
+                except Exception:
+                    self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
+                    return result
+                
+                for entry in res:
+                    
+
+
+
+            
+                    
