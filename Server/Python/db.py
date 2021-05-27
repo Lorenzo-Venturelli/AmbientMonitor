@@ -196,7 +196,7 @@ class MySQL:
         else:                                                                               # Table not supported
             return False
 
-    async def readData(self, tableName: str, options: dict = {}) -> dict:
+    async def readData(self, tableName: str, options: dict = {}) -> list:
         '''
         Read data from a table. Particular constraints can be specified with (options)
         Return a dictionary containing the result.
@@ -210,21 +210,123 @@ class MySQL:
             raise Exception("Table " + str(tableName) + " not supported")
         else:
             if await self.createTable(tableName = tableName) == False:                      # Try to create the table to avoid errors
-                return False
+                raise Exception("Impossible to create the table, DB error")
 
+        result = list()
         if tableName == self._SUPPORTED_DB_TABLES[0]:                                       # Recordings table
-            result = dict()
-            if options == dict():                                                           # No options are provided
-                query = "SELECT * FROM Recordings"                                          # Let's read the entire table
+            query = "SELECT * FROM Recordings"                                              # In principle, we'll read the entire table
+            if options != dict():                                                           # There are options
+                query = query + " WHERE "                                                   # Add contidional statement
+                queryLen = len(query)
 
-                try:
-                    self._cursor.execute(query)
-                    res = self._cursor.fetchall()
-                except Exception:
-                    self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
-                    return result
+                if "firstTime" in options.keys():                                           # It is specified the initial timestamp, read records that are younger
+                    if type(options["firstTime"]) != int:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND "
+
+                    query = query + "timestamp <= " + str(options["firstTime"])
                 
-                for entry in res:
+                if "lastTime" in options.keys():                                            # It is specified the final timestamp, read records that are older
+                    if type(options["lastTime"]) != int:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND "
+
+                    query = query + "timestamp >= " + str(options["lastTime"])
+
+                if "uidList" in options.keys():                                             # List of UIDs to request
+                    if type(options["uidList"]) != list:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND ("
+
+                    queryLen = len(query)
+                    for uid in options["uidList"]:                                          # For each UID, update the query
+                        if type(uid) != int:
+                            raise TypeError
+
+                        if queryLen < len(query):
+                            query = query + " OR "
+                        
+                        query = query + "UID = " + str(uid)
+                    
+                    query = query + ")"
+        elif tableName == self._SUPPORTED_DB_TABLES[1]:                                     # Devices table
+            query = "SELECT * FROM Devices"
+            
+            if options != dict():                       
+                query = query + " WHERE "                                                   # Add contidional statement
+                queryLen = len(query)
+
+                if "uidList" in options.keys():                                             # Read only specified UIDs
+                    if type(options["uidList"]) != list:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND ("
+
+                    tmpLen = len(query)
+                    for uid in options["uidList"]:                                          # For each UID, update the query
+                        if type(uid) != int:
+                            raise TypeError
+
+                        if tmpLen < len(query):
+                            query = query + " OR "
+                        
+                        query = query + "UID = " + str(uid)
+                    
+                    query = query + ")"
+                
+                if "cityList" in options.keys():                                            # Devices from the specified cities
+                    if type(options["cityList"]) != list:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND ("
+
+                    tmpLen = len(query)
+                    for city in options["cityList"]:                                        # For each City, update the query
+                        if type(city) != int:
+                            raise TypeError
+
+                        if tmpLen < len(query):
+                            query = query + " OR "
+                        
+                        query = query + "City = " + str(city)
+                    
+                    query = query + ")"
+
+                if "countryList" in options.keys():                                         # Devices from the specified countries
+                    if type(options["countryList"]) != list:
+                        raise TypeError
+                    if queryLen < len(query):
+                        query = query + " AND ("
+
+                    tmpLen = len(query)
+                    for country in options["countryList"]:                                  # For each country, update the query
+                        if type(country) != int:
+                            raise TypeError
+
+                        if tmpLen < len(query):
+                            query = query + " OR "
+                        
+                        query = query + "Country = " + str(country)
+                    
+                    query = query + ")"
+            else:                                                                           # Unsupported table
+                self._logger.warning("Table " + str(tableName) + " is not supported")
+                raise Exception("Table " + str(tableName) + " not supported")
+        
+        try:                                                                                # Execute the query and collect the results
+            self._cursor.execute(query)
+            result = self._cursor.fetchall()
+            return result
+        except Exception:
+            self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
+            return result
+
+
+
+
                     
 
 
