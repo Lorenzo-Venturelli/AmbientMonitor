@@ -1,5 +1,5 @@
-import logging, sys, time, json, copy, asyncio
-from typing import Type
+import logging, sys, time, json, copy, asyncio, datetime
+from typing import Type, final
 from interfaces import System
 try:
     import mysql.connector
@@ -323,6 +323,32 @@ class MySQL:
         except Exception:
             self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
             return result
+
+    async def optimizeDB(self, tableName: str, option: dict) -> bool:
+        '''
+        Reduce the size of the given table by summarizing its records according to the given options.
+        Each table have its own constraints. The user of this method must know them.
+        If one or more constraints are violated, this method returns False.
+        '''
+
+        if type(tableName) != str or type(option) != dict:
+            raise TypeError
+
+        if tableName == self._SUPPORTED_DB_TABLES[0]:                                       # Reocrding table, optimization supported
+            if "period" in option.keys():                                                   # It's specified the period that has to be covered by this action
+                
+                # The final time is the current hour at its beginnig
+                currentTime = datetime.datetime.now()
+                finalTime = datetime.datetime(year = currentTime.year, month = currentTime.month, day = currentTime.day, hour = currentTime.hour)
+
+                if option["period"] == "day":                                               # We have to optimize the last 24 hours
+                    initialTime = finalTime + datetime.timedelta(hours = -24)               # The range is in the last 24 hours
+                elif option["period"] == "month":                                           # We have to optimize the last month
+                    initialTime = finalTime + datetime.timedelta(days = -30)                # Standard 30 days period
+                elif option["period"] == "year":                                            # We have to optimize the last year
+                    initialTime = finalTime + datetime.timedelta(days = -365)               # Standard 365 days period
+        else:                                                                               # This table doesn't exixt or it doesn't support optimization
+            return False
 
 
 
