@@ -162,7 +162,7 @@ class MySQL:
                 # For each element (a single recording from "UID" device), execute the query
                 for timestamp in data["values"].keys():
                     try:
-                        val = (str(timestamp), str(data["UID"]), str(data["values"][timestamp]["pressure"]), str(data["values"][timestamp]["temperature"]), str(data["values"][timestamp]["humidity"]), str(data["values"][timestamp]["Ligth"]))
+                        val = (str(timestamp), str(data["UID"]), str(data["values"][timestamp]["pressure"]), str(data["values"][timestamp]["temperature"]), str(data["values"][timestamp]["humidity"]), str(data["values"][timestamp]["ligth"]))
                     except Exception:                                                       # Something in the data structure is wrong, this line is invalid, skip to the next one
                         continue
 
@@ -324,6 +324,89 @@ class MySQL:
             self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
             return result
 
+    async def removeData(self, tableName: str, options: dict = dict()) -> bool:
+        '''
+        Delete records from the specified table according to the given options.
+        Each table has its own options, the caller must know them!
+        In case of success returns True, otherwhise False.
+        '''
+
+        if type(tableName) != str or type(options) != dict:
+            raise TypeError
+
+        if tableName == self._SUPPORTED_DB_TABLES[0]:                                       # Recordings
+            query = "DELETE FROM Recordings"                                                # By default, it drops the whole table
+            conditions = 0
+
+            if "UID" in options.keys():                                                     # Delete all records with this specified UID
+                if type(options["UID"]) != int:
+                    raise TypeError
+
+                query = query + " WHERE UID = " + str(options["UID"])
+                conditions = conditions + 1
+            
+            if "firstTime" in options.keys():                                               # Only with timestamp bigger than this
+                if type(options["firstTime"]) != int:
+                    raise TypeError
+
+                if conditions > 0:
+                    query = query + " AND ("
+                else:
+                    query = query + " WHERE "
+
+                query = query + "timestamp >= " + str(options["firstTime"])
+                conditions = conditions + 1
+            
+            if "lastTime" in options.keys():                                                # Only with timestamp smaller than this
+                if type(options["lastTime"]) != int:
+                    raise TypeError
+
+                if conditions > 0:
+                    query = query + " AND "
+                else:
+                    query = query + " WHERE "
+
+                query = query + "timestamp <= " + str(options["lastTime"])
+
+                if conditions > 1:
+                    query = query + ")"
+        elif tableName == self._SUPPORTED_DB_TABLES[1]:                                     # Devices 
+            query = "DELETE FROM Devices"
+
+            if "UID" in options.keys():
+                if type(options["UID"]) != int:
+                    raise TypeError
+
+                query = query + " WHERE UID = " + str(options["UID"])
+        else:                                                                               # Table not supported
+            self._logger.warning("Table " + str(tableName) + " is not supported")
+            raise Exception("Table " + str(tableName) + " not supported")
+
+        try:
+            self._cursor.execute(query)
+            return True
+        except Exception:
+            self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
+            return False
+    
+    def _recordsByUID(self, uid: str, rawRecords: list) -> tuple:
+        '''
+        Generator which returns a single record (tuple) that matches the given UID
+        '''
+
+        if type(uid) != int or type(rawRecords) != list:
+            raise TypeError
+
+        try:
+            for record in rawRecords:
+                if uid == int(record[1]):
+                    yield record
+        except Exception as e:
+            self._logger.error("Records list passed to generator has a wrong structure")
+            raise e
+
+        
+
     async def optimizeDB(self, tableName: str, option: dict) -> bool:
         '''
         Reduce the size of the given table by summarizing its records according to the given options.
@@ -335,21 +418,106 @@ class MySQL:
             raise TypeError
 
         if tableName == self._SUPPORTED_DB_TABLES[0]:                                       # Reocrding table, optimization supported
+
+            # The final time is the current hour at its beginnig
+            currentTime = datetime.datetime.now()
+            finalTime = datetime.datetime(year = currentTime.year, month = currentTime.month, day = currentTime.day, hour = currentTime.hour)
+
             if "period" in option.keys():                                                   # It's specified the period that has to be covered by this action
                 
-                # The final time is the current hour at its beginnig
-                currentTime = datetime.datetime.now()
-                finalTime = datetime.datetime(year = currentTime.year, month = currentTime.month, day = currentTime.day, hour = currentTime.hour)
-
                 if option["period"] == "day":                                               # We have to optimize the last 24 hours
                     initialTime = finalTime + datetime.timedelta(hours = -24)               # The range is in the last 24 hours
                 elif option["period"] == "month":                                           # We have to optimize the last month
                     initialTime = finalTime + datetime.timedelta(days = -30)                # Standard 30 days period
                 elif option["period"] == "year":                                            # We have to optimize the last year
                     initialTime = finalTime + datetime.timedelta(days = -365)               # Standard 365 days period
-        else:                                                                               # This table doesn't exixt or it doesn't support optimization
-            return False
+                else:                                                                       # The given period is not supported, assume "day"
+                    option["period"] = "day"
+                    initialTime = finalTime + datetime.timedelta(hours = -24)
+            else:                                                                           # No period is specified, let's assume "day"
+                option["period"] = "day"
+                initialTime = finalTime + datetime.timedelta(hours = -24)
 
+            # We need the timestamp to manage records
+            finalTime = finalTime.timestamp()
+            initialTime = initialTime.timestamp()
+
+            try:
+                # Get the records that will be optimized
+                rawRecords = await self.readData(tableName = tableName, options = {"firstTime" : initialTime, "lastTime" : finalTime})
+            except Exception:
+                self._logger.warning("Error occurred while fatching raw record for a DB optimization")
+                return False
+
+            # Get a list of UIDs that will  be processed
+            uids = list()
+            for record in rawRecords:
+                uids.append(int(record[1]))
+            
+            # Delete duplicates
+            uids = set(uids)
+
+            # List of new records that will substitute the raw ones
+            avgRecords = dict()
+
+            # For each UID in the set, get and ordered sequence of records and build the compressed output
+            try:
+                for uid in uids:
+                    tmpRecord = [0, uid, 0, 0, 0, 0]                                    # Let's create a new empty record that will store the computed average
+                    iterations = 0                                                      # Number of records that will be substituted by this new one
+                    avgRecords["UID"] = uid
+                    avgRecords["values"] = dict()
+                    
+                    # Let's analize each record, according to the period
+                    for record in sorted(self._recordsByUID(uid = uid, rawRecords = rawRecords)):
+                        
+                        if tmpRecord[0] == 0:                                           # If this is the first iteration for this new summarized record
+                            # From the first record in this block calculate the timestamp (always consider minutes and seconds equal to 0)
+                            newBlock = datetime.datetime.fromtimestamp(record[0])
+                            newBlock = datetime.datetime(year = newBlock.year, month = newBlock.month, day = newBlock.day, hour = newBlock.hour)
+                            tmpRecord[0] = int(newBlock.timestamp())
+
+                        # Depending on the period, check if this record is still within the current block. If yes, use it to calculate the average
+                        if ((option["period"] == "day" and (record[0] - tmpRecord[0]) < 3600) or (option["period"] == "month" and (record[0] - tmpRecord[0]) < 14400) or
+                            (option["period"] == "year" and (record[0] - tmpRecord[0]) < 43200)):
+                            
+                            for element in (2, 3, 4, 5):
+                                tmpRecord[element] = tmpRecord[element] + record[element]
+
+                            iterations = iterations + 1
+                        else:                                                           # This record is outside of the current block
+                            for element in (2, 3, 4, 5):
+                                tmpRecord[element] = tmpRecord[element] / iterations    # Calculate the average for each value
+                            
+                            # Now that we have calculated a summarized record associated to this block, let's save it in a valid format
+                            avgRecords["values"][str(tmpRecord[0])] = {"pressure" : tmpRecord[2], "temperature" : tmpRecord[3], "humidity" : tmpRecord[4], "light" : tmpRecord[5]}
+                            
+                            # Initialize a new block
+                            newBlock = datetime.datetime.fromtimestamp(record[0])
+                            newBlock = datetime.datetime(year = newBlock.year, month = newBlock.month, day = newBlock.day, hour = newBlock.hour)
+                            tmpRecord[0] = int(newBlock.timestamp())
+                            for element in (2, 3, 4, 5):
+                                tmpRecord[element] = tmpRecord[element] + record[element]
+                            iterations = 1
+
+                    # Now we have processed every block in the given range for this UID so it's time to remove the old records and insert the new ones
+                    try:
+                        if await self.removeData(tableName = tableName, options = {"UID" : uid, "firstTime" : initialTime, "lastTime" : finalTime}) == True:
+                            if await self.insertData(tableName = tableName, data = avgRecords) != True:
+                                raise Exception("Impossible to insert the new data, the processed blocks are lost!")
+                            else:
+                                raise Exception("Impossible to remove the raw records. Nothing has been lost")
+                    except Exception:
+                        self._logger.error("An error occurred while updating the DB with optimized data", exc_info = True)
+                        return False
+                
+                # Every UID within the time window has been processed and the summarized records took the place of raw one, all done
+                return True
+            except Exception:                                                           # Something went wrong so in order not to lose anything, abort the whole operation
+                self._logger.error("An error occurred while optimizing the fetched records", exc_info = True)
+                return False
+        else:                                                                           # This table doesn't exixt or it doesn't support optimization
+            return False
 
 
 

@@ -72,7 +72,7 @@ class Sensors(threading.Thread):
                     newData["pressure"] = int(self._sensorsList["P"].read_pressure())
                     newData["temperature"] = round(self._sensorsList["T&H"].temperature, 1)
                     newData["humidity"] = round(self._sensorsList["T&H"].humidity, 1)
-                    newData["Ligth"] = round(self._sensorsList["L"].lux, 3)
+                    newData["ligth"] = round(self._sensorsList["L"].lux, 3)
                     success = True
                 except RuntimeError:                                                        # Just a silly runtime error
                     self._logger.debug("RuntimeError while reading sensors")
