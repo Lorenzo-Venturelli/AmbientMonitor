@@ -1,4 +1,4 @@
-import threading, socket, logging, time, asyncio, json
+import threading, socket, logging, time, asyncio, json, datetime
 from interfaces import System, Data, Event, CryptoHandler
 from db import MySQL
 
@@ -30,6 +30,7 @@ class TcpServer(threading.Thread):
         self._server = None
         self._asyncLoop = None
         self._asyncApp = None
+        self._periodicDBTask = None
 
         (self._srvPubKey, self._srvPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
         super().__init__(daemon = False)
@@ -143,18 +144,51 @@ class TcpServer(threading.Thread):
             await writer.wait_closed()
             return
 
+    async def _optimizeDB(self) -> None:
+        '''
+        This coroutine execute once every 24 hours to optimize the DB usage by reducing the records resolution
+        '''
+        
+        try:
+            while self._isRunning == True:
+                currentTime = datetime.datetime.now()                                       # Get the current time in order to understand which optimization has to be done
+
+                if currentTime.month == 1 and currentTime.day == 1:                         # Today is 01/01
+                    if await self._db.optimizeDB(tableName = "Recordings", option = {"period" : "year"}) == True:
+                        self._logger.debug("Year wide optimization has been successfull")
+                    else:
+                        self._logger.warning("Year wide optimization failed")
+
+                if currentTime.day == 1:                                                    # First day of the month
+                    if await self._db.optimizeDB(tableName = "Recordings", option = {"period" : "month"}) == True:
+                        self._logger.debug("Month wide optimization has been successfull")
+                    else:
+                        self._logger.warning("Month wide optimization failed")
+                
+                if await self._db.optimizeDB(tableName = "Recordings", option = {"period" : "day"}) == True:
+                    self._logger.debug("Day wide optimization has been successfull")
+                else:
+                    self._logger.warning("Day wide optimization failed")
+        except asyncio.CancelledError:
+            self._logger.debug("Periodic DB optimization routine terminated gracefully")
+        except Exception:
+            self._logger.critical("Periodic DB optimization routine terminated with errors", exc_info = True)
+        return
+ 
     def stopThread(self) -> None:
         '''Close the server endpoint'''
         self._isRunning = False                                                     # Update the status flag
 
         if self._asyncLoop != None:                                                 # If the async loop already exists
+            if self._periodicDBTask != None:                                        # There is the periodic DB optimization routine 
+                self._periodicDBTask.cancel()                                       # Close it
+
             self._asyncLoop.stop()                                                  # Stop the async loop. This won't wake up the system so let's fake a connection
 
             # The async loop is stopped so this connection will wake up the async ThreadPoolExecutor which will then terminate
             fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
             fakeClient.close()
-
         return
 
     def run(self) -> None:
@@ -181,6 +215,7 @@ class TcpServer(threading.Thread):
                     continue
                 
                 if self._openServer() == True:                                      # Try to open the async server
+                    self._periodicDBTask = self._asyncLoop.create_task(self._optimizeDB())
                     self._asyncLoop.run_forever()                                   # In case of success, wait here the closure
                 else:                                                               # Impossible to open the server
                     time.sleep(120)                                                 # Wait 2 minutes and then try again
