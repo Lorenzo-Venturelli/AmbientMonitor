@@ -428,8 +428,10 @@ class MySQL:
                 if option["period"] == "day":                                               # We have to optimize the last 24 hours
                     initialTime = finalTime + datetime.timedelta(hours = -24)               # The range is in the last 24 hours
                 elif option["period"] == "month":                                           # We have to optimize the last month
+                    finalTime = finalTime + datetime.timedelta(hours = -24)                 # We have to let the last 24 hours unchanged
                     initialTime = finalTime + datetime.timedelta(days = -30)                # Standard 30 days period
                 elif option["period"] == "year":                                            # We have to optimize the last year
+                    finalTime = finalTime + datetime.timedelta(days = -30)                  # We have to leave the last 30 days unchanged
                     initialTime = finalTime + datetime.timedelta(days = -365)               # Standard 365 days period
                 else:                                                                       # The given period is not supported, assume "day"
                     option["period"] = "day"
@@ -519,11 +521,4 @@ class MySQL:
         else:                                                                           # This table doesn't exixt or it doesn't support optimization
             return False
 
-
-
-                    
-
-
-
-            
-                    
+             
