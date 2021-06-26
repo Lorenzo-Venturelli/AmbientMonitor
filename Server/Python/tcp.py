@@ -33,7 +33,7 @@ class TcpServer(threading.Thread):
         self._periodicDBTask = None
 
         (self._srvPubKey, self._srvPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
-        super().__init__(daemon = False)
+        super().__init__(daemon = False, name = "TCP Server")
 
     def _openServer(self) -> bool:
         '''Open a server side endpoint. If this is not possible, kill this thread'''
@@ -189,6 +189,8 @@ class TcpServer(threading.Thread):
             fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
             fakeClient.close()
+
+            self._db.close()                                                        # Close the connection to DB
         return
 
     def run(self) -> None:
@@ -196,7 +198,7 @@ class TcpServer(threading.Thread):
             if self._isRunning == False:                                            # Check the thread status
                 try:
                     self._server.close()                                            # Close the server coroutine
-                    self._asyncLoop.run_until_complete(self._server.wait_closed())  # Wait for it's termination
+                    self._asyncLoop.run_until_complete(self._server.wait_closed())  # Wait for its termination
                 except Exception:                                                   # Something went wrong
                     self._logger.critical("Error occurred while closing the TCP server async loop", exc_info = True)
 

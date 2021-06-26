@@ -12,7 +12,7 @@ if arguments > 0:
         
 import threading, logging, sys, time, signal
 from interfaces import Data, Event, System, InterruptHandler
-import tcp
+import tcp, telegramBot
 
 if __name__ == "__main__":
     with InterruptHandler() as sig:
