@@ -10,7 +10,7 @@ except ImportError:
 class MySQL:
 
     _DEFAULT_SQL_SETTINGS = {"host_db" : "localhost", "user_db" : "dbmanager", "password_db" : "Trattoreventurelli0406!", "name_db" : "ambientmonitordb"}
-    _SUPPORTED_DB_TABLES = ["Recordings", "Devices", "Users", "Updates"]
+    _SUPPORTED_DB_TABLES = ["Recordings", "Devices", "People", "Updates"]
     
     def __init__(self, system: object, logger : object):
         
@@ -522,8 +522,6 @@ class MySQL:
         except Exception as e:
             self._logger.error("Records list passed to generator has a wrong structure")
             raise e
-
-        
 
     async def optimizeDB(self, tableName: str, option: dict) -> bool:
         '''
