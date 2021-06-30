@@ -10,7 +10,7 @@ except ImportError:
 class MySQL:
 
     _DEFAULT_SQL_SETTINGS = {"host_db" : "localhost", "user_db" : "dbmanager", "password_db" : "Trattoreventurelli0406!", "name_db" : "ambientmonitordb"}
-    _SUPPORTED_DB_TABLES = ["Recordings", "Devices"]
+    _SUPPORTED_DB_TABLES = ["Recordings", "Devices", "Users", "Updates"]
     
     def __init__(self, system: object, logger : object):
         
@@ -124,9 +124,16 @@ class MySQL:
 
         try:
             if tableName == self._SUPPORTED_DB_TABLES[0]:           # Main table to store all the received data as they are
-                self._cursor.execute("CREATE TABLE Recordings (timestamp INT NOT NULL, UID BIGINT NOT NULL, Pressure DECIMAL NOT NULL, Temperature DECIMAL NOT NULL, Humidity DECIMAL NOT NULL, Ligth DECIMAL NOT NULL, PRIMARY KEY (timestamp, UID))")
-            elif tableName == self._SUPPORTED_DB_TABLES[1]:
-                self._cursor.execute("CREATE TABLE Devices (UID BIGINT NOT NULL, Country VARCHAR[4] NOT NULL, City VARCHAR[255], PRIMARY KEY (UID))")
+                self._cursor.execute('''CREATE TABLE Recordings (timestamp BIGINT UNSIGNED NOT NULL, UID BIGINT UNSIGNED NOT NULL, Pressure DECIMAL(19, 5) NOT NULL, Temperature DECIMAL(19, 5) NOT NULL, Humidity DECIMAL(19, 5) NOT NULL,
+                    Ligth DECIMAL(19, 5) NOT NULL, PRIMARY KEY (timestamp, UID), FOREIGN KEY (UID) REFERENCES Devices (UID))''')
+            elif tableName == self._SUPPORTED_DB_TABLES[1]:         # List of available devices
+                self._cursor.execute("CREATE TABLE Devices (UID BIGINT UNSIGNED NOT NULL, Country VARCHAR(4) NOT NULL, City VARCHAR(255), PRIMARY KEY (UID))")
+            elif tableName == self._SUPPORTED_DB_TABLES[2]:         # List of users
+                self._cursor.execute("CREATE TABLE People (ID BIGINT UNSIGNED NOT NULL, Name VARCHAR(255) NOT NULL, Surname VARCHAR(255) NOT NULL, PRIMARY KEY (ID))")
+            elif tableName == self._SUPPORTED_DB_TABLES[3]:         # Relation between a user and its devices
+                self._cursor.execute("CREATE TABLE Updates (Person BIGINT UNSIGNED NOT NULL, Sensor BIGINT UNSIGNED NOT NULL, PRIMARY KEY (Person, Sensor), FOREIGN KEY (Person) REFERENCES People (ID), FOREIGN KEY (Sensor) REFERENCES Devices (UID))")
+            else:
+                return False                                        # Table not supported
             return True
         except Exception:
             self._logger.error("Failed to create the table " + tableName)
@@ -171,9 +178,6 @@ class MySQL:
                     except Exception:
                         self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
                         continue
-
-                self._handler.commit()                                                      # Commit changes to the DB to save them
-                return True
         elif tableName == self._SUPPORTED_DB_TABLES[1]:
             # Write the query
             query = "INSERT INTO Devices VALUES (%s, %s, %s)"
@@ -181,7 +185,7 @@ class MySQL:
             # For each element (a single device), execute the query
             for uid in data.keys():
                 try:
-                    val = (str(uid), str(data[uid]["Country"]), str(data[uid]["City"]))
+                    val = (str(uid), str(data[uid]["country"]), str(data[uid]["city"]))
                 except Exception:                                                           # Something in the data structure is wrong, this line is invalid, skip to the next one
                     continue
 
@@ -190,10 +194,45 @@ class MySQL:
                 except Exception:
                     self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
                     continue
+        elif tableName == self._SUPPORTED_DB_TABLES[2]:
+            # Write the query
+            query = "INSERT INTO People VALUES (%s, %s, %s)"
+
+            # For each person, execute the query
+            for id in data.keys():
+                try:
+                    val = (str(id), str(data[id]["name"]), str(data[id]["surname"]))
+                except Exception:                                                           # Something in the data structure is wrong, this line is invalid, skip to the next one
+                    continue
             
-            self._handler.commit()
-            return True
+                try:
+                    self._cursor.execute(query, val)
+                except Exception:
+                    self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
+                    continue
+        elif tableName == self._SUPPORTED_DB_TABLES[3]:
+            # Write the query
+            query = "INSERT INTO Updates VALUES (%s, %s)"
+
+            for entry in data.keys():
+                try:
+                    val = (str(data[entry]["person"]), str(data[entry]["sensor"]))
+                except Exception:                                                           # Something in the data structure is wrong, this line is invalid, skip to the next one
+                    continue
+            
+                try:
+                    self._cursor.execute(query, val)
+                except Exception:
+                    self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
+                    continue
         else:                                                                               # Table not supported
+            return False
+
+        try:
+            self._handler.commit()                                                              # Commit changes to the DB to save them
+            return True
+        except Exception:
+            self._logger.warning("Impossible to commit an INSERT operation to DB regarding table: " + tableName)
             return False
 
     async def readData(self, tableName: str, options: dict = {}) -> list:
@@ -240,6 +279,8 @@ class MySQL:
                         raise TypeError
                     if queryLen < len(query):
                         query = query + " AND ("
+                    else:
+                        query = query + "("
 
                     queryLen = len(query)
                     for uid in options["uidList"]:                                          # For each UID, update the query
@@ -252,6 +293,9 @@ class MySQL:
                         query = query + "UID = " + str(uid)
                     
                     query = query + ")"
+
+                if len(query) == queryLen:                                                  # No valid option detected, revert to the original query
+                    query = "SELECT * FROM Devices"
         elif tableName == self._SUPPORTED_DB_TABLES[1]:                                     # Devices table
             query = "SELECT * FROM Devices"
             
@@ -264,6 +308,8 @@ class MySQL:
                         raise TypeError
                     if queryLen < len(query):
                         query = query + " AND ("
+                    else:
+                        query = query + "("
 
                     tmpLen = len(query)
                     for uid in options["uidList"]:                                          # For each UID, update the query
@@ -282,6 +328,8 @@ class MySQL:
                         raise TypeError
                     if queryLen < len(query):
                         query = query + " AND ("
+                    else:
+                        query = query + "("
 
                     tmpLen = len(query)
                     for city in options["cityList"]:                                        # For each City, update the query
@@ -300,6 +348,8 @@ class MySQL:
                         raise TypeError
                     if queryLen < len(query):
                         query = query + " AND ("
+                    else:
+                        query = query + "("
 
                     tmpLen = len(query)
                     for country in options["countryList"]:                                  # For each country, update the query
@@ -312,9 +362,45 @@ class MySQL:
                         query = query + "Country = " + str(country)
                     
                     query = query + ")"
-            else:                                                                           # Unsupported table
-                self._logger.warning("Table " + str(tableName) + " is not supported")
-                raise Exception("Table " + str(tableName) + " not supported")
+
+                if len(query) == queryLen:                                                  # No valid option detected, revert to the original query
+                    query = "SELECT * FROM Devices"
+        elif tableName == self._SUPPORTED_DB_TABLES[2]:                                     # People table 
+            query = "SELECT * FROM People"
+
+            if options != dict():
+                if "id" in options.keys():
+                    if type(options["id"]) != int:
+                        raise TypeError
+
+                    query = query + " WHERE ID = " + str(options["id"])
+        elif tableName == self._SUPPORTED_DB_TABLES[3]:                                     # Updates table
+            query = "SELECT * FROM Updates"
+
+            if options != dict():
+                query = query + " WHERE "
+                queryLen = len(query)
+
+                if "person" in options.keys():
+                    if type(options["person"]) != int:
+                        raise TypeError
+
+                    query = query + "Person = " + str(options["person"])
+
+                if "sensor" in options.keys():
+                    if type(options["sensor"]) != int:
+                        raise TypeError
+
+                    if queryLen < len(query):
+                        query = query + " AND "
+
+                    query = query + "Sensor = " + str(options["sensor"])
+
+                if len(query) == queryLen:
+                    query = "SELECT * FROM Updates"
+        else:                                                                               # Unsupported table
+            self._logger.warning("Table " + str(tableName) + " is not supported")
+            raise Exception("Table " + str(tableName) + " not supported")
         
         try:                                                                                # Execute the query and collect the results
             self._cursor.execute(query)
@@ -378,6 +464,38 @@ class MySQL:
                     raise TypeError
 
                 query = query + " WHERE UID = " + str(options["UID"])
+        elif tableName == self._SUPPORTED_DB_TABLES[2]:                                     # People
+            query = "DELETE FROM People"
+
+            if "id" in options.keys():
+                if type(options["id"]) != int:
+                    raise TypeError
+
+                query = query + " WHERE ID = " + str(options["id"])
+        elif tableName == self._SUPPORTED_DB_TABLES[2]:                                     # Updates
+            query = "DELETE FROM Updates"
+
+            if options != dict():
+                query = query + " WHERE "
+                queryLen = len(query)
+
+            if "person" in options.keys():
+                if type(options["person"]) != int:
+                    raise TypeError
+
+                query = query + "Person = " + str(options["person"])
+
+            if "sensor" in options.keys():
+                if type(options["sensor"]) != int:
+                    raise TypeError
+
+                if queryLen < len(query):
+                    query = query + " AND "
+                
+                query = query + "Sensor = " + str(options["sensor"])
+
+            if len(query) == queryLen:
+                query = "DELETE FROM Updates"
         else:                                                                               # Table not supported
             self._logger.warning("Table " + str(tableName) + " is not supported")
             raise Exception("Table " + str(tableName) + " not supported")
