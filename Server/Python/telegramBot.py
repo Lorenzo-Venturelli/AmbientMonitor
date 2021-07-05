@@ -18,11 +18,11 @@ class TelegramBot(threading.Thread):
         self._logger = logger
         self._db = MySQL(system = system, logger = logger)
         self._commandCallbacks = {
-            "aggiungi_città"        :   self._newSub, 
-            "rimuovi_città"         :   self._removeSub,
-            "controlla_città"       :   self._getUpdate, 
-            "ricevi_statistiche"    :   self._getStats, 
-            "mostra_panoramica"     :   self._showBrief
+            "addCity"           :   self._newSub, 
+            "removeCity"        :   self._removeSub,
+            "checkCity"         :   self._getUpdate, 
+            "getStats"          :   self._getStats, 
+            "showBrief"         :   self._showBrief
         }
 
         for item in self._DEFAULT_TELEGRAM_BOT_SETTINGS.keys():
@@ -65,15 +65,15 @@ class TelegramBot(threading.Thread):
             # This task must wake up every "botUpdatePeriod" hours to send all the updates
             await asyncio.sleep(delay = self._system.settings["botUpdatePeriod"] * 3600)
 
-            # UserList dovrebbe essere un dizionario con tutte le info dell'utente. Prima di proseguire con le select è meglio verificare che 
-            # quell'utente voglia l'aggiornamento proprio adesso (comunque multiplo di 4)
+            # UserList dovrebbe essere un dizionario con tutte le info dell'utente.
             # Dal dizionario si tira fuori la chiave che è il chat id e si prendono i sensori, dai quali si prende il record più recente
             # Si manda un messaggio all'utente dicendo "Ciao UTENTE, ecco i tuoi aggiornamenti in tempo reale..."
 
             userList = await self._db.getUserList()                                     # Get a list of subscribed users
-            for user in userList:                                                       # For each user
-                cityList = await self._db.getSensorsByUser(userID = user)               # Get a list of associated cities
+            for user in userList.keys():                                                # For each user
+                cityList = await self._db.getSensorsByUser(ID = user)                   # Get a list of associated cities
                 updatePacket = await self._db.getUpdateByCity(cities = cityList)        # For all the associated cities, get the most recent record
+    
     def stopThread(self) -> None:
         '''
         Close this Telegram Bot Thread
@@ -100,6 +100,16 @@ class TelegramBot(threading.Thread):
 
     def run(self) -> None:
         
+        # Open the DB handler. In case of error, it's not possible to keep going
+        try:
+            if self._db.status == False:
+                if self._db.open() == False:
+                    raise Exception
+        except Exception:
+            self._logger.critical("Impossible to open the DB Handler for Telegram bot")
+            self.stopThread()
+            return
+
         # Create the Bot Updater and it's linked Dispatcher
         try:
             self._updater = Updater(self._AUTH_TOKEN, use_context = True)
@@ -128,7 +138,7 @@ class TelegramBot(threading.Thread):
         try:
             self._asyncLoop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._asyncLoop)
-            self._periodicUpdateTask = self._asyncLoop.create_task(self._sendPeriodicUpdate)
+            self._periodicUpdateTask = self._asyncLoop.create_task(self._sendPeriodicUpdate())
         except Exception:
             self._logger.critical("Impossible to set up Async environment for Telegram Bot Thread", exc_info = True)
             self._isRunning = False

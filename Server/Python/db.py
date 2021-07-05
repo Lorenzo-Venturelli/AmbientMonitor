@@ -1,5 +1,5 @@
 import logging, sys, time, json, copy, asyncio, datetime
-from typing import Type, final
+
 from interfaces import System
 try:
     import mysql.connector
@@ -111,12 +111,14 @@ class MySQL:
 
         try:
             self._cursor.execute("SHOW TABLES")                     # Get the existing tables
-            existingTables = self._cursor.fetchall()
+            result = self._cursor.fetchall()
 
-            if existingTables != []:
-                existingTables = existingTables[0]
+            # Format the query output to get a list of tables
+            existingTables = list()
+            for row in result:
+                existingTables.append(row[0])                       # A row is alwais a tuple, even if there is just one element inside
 
-            if tableName in existingTables:                             # The table already exists so there is no need to create it again
+            if tableName in existingTables:                         # The table already exists so there is no need to create it again
                 return True
         except Exception:
             self._logger.error("Impossible to read tables from DB")
@@ -557,8 +559,8 @@ class MySQL:
                 initialTime = finalTime + datetime.timedelta(hours = -24)
 
             # We need the timestamp to manage records
-            finalTime = finalTime.timestamp()
-            initialTime = initialTime.timestamp()
+            finalTime = int(finalTime.timestamp())
+            initialTime = int(initialTime.timestamp())
 
             try:
                 # Get the records that will be optimized
@@ -654,6 +656,7 @@ class MySQL:
         # For each user, store the info. In case of error on a single user, just ignore it
         for user in rawData:
             try:
+                formattedData[user[0]] = dict()
                 formattedData[user[0]]["Name"] = user[1]
                 formattedData[user[0]]["Surname"] = user[2]
             except IndexError:
@@ -679,10 +682,20 @@ class MySQL:
         try:
             self._cursor.execute(query)
             result = self._cursor.fetchall()
-            return result
         except Exception:
             self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
             return tuple()
+
+        # Format the output to return a tuple of sensors UID
+        sensors = list()
+        for row in result:
+            try:
+                sensors.append(row[0])
+            except Exception:
+                self._logger.warning("Impossible to format a row in getSensorByUser")
+                continue
+
+        return tuple(sensors)
 
     async def getUpdateByCity(self, cities: tuple) -> dict:
         '''
@@ -692,16 +705,24 @@ class MySQL:
         if type(cities) != tuple:
             raise TypeError
 
+        # An empty tuple is meaningless, let's return immediately
+        if cities == tuple():
+            return dict()
+
+        # To avoid errors with the query, if there is only one city, let's fix the format
+        if len(cities) == 1:
+            cities = "({})".format(cities[0])
+
         # The result will be stored here
         formattedData = dict()
 
         # Create the query
-        query = "SELECT * FROM %s R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM %s R2 WHERE R2.UID = R1.UID) AND R1.UID IN %s"
-        val = [self._SUPPORTED_DB_TABLES[0], self._SUPPORTED_DB_TABLES[0], cities]
+        query = "SELECT * FROM {table} R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM {table} R2 WHERE R2.UID = R1.UID) AND R1.UID IN {cities}"
+        query = query.format(table = self._SUPPORTED_DB_TABLES[0], cities = str(cities))
 
         # For each city, request the data
         try:
-            self._cursor.execute(query, val)
+            self._cursor.execute(query)
             result = self._cursor.fetchall()
         except Exception:
             self._logger.warning("Error occurred while fetching recordings by city", exc_info = True)

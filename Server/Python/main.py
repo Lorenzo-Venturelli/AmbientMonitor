@@ -36,12 +36,14 @@ if __name__ == "__main__":
 
             # Create threads
             serverThread = tcp.TcpServer(data = dataInterface, event = eventInterface, system = systemInterface, logger = logger)
+            telegramThread = telegramBot.TelegramBot(data = dataInterface, event = eventInterface, system = systemInterface, logger = logger)
 
             # Store the threads' objects so that they'll be available program-wide
-            dataInterface.store(itemName = "threads", item = (serverThread), itemType = "tuple", storeByReference = True)
+            dataInterface.store(itemName = "threads", item = (serverThread, telegramThread), itemType = "tuple", storeByReference = True)
 
             # Start the threads
             serverThread.start()
+            telegramThread.start()
 
             while sig.interrupted == False:                                     # Sleep until a keyboard interrupt occur
                 time.sleep(1)
@@ -53,6 +55,8 @@ if __name__ == "__main__":
     try:
         serverThread.stopThread()
         serverThread.join()
+        telegramThread.stopThread()
+        telegramThread.join()
     except Exception as e:
         print(e)
         sys.exit(1)

@@ -169,6 +169,8 @@ class TcpServer(threading.Thread):
                     self._logger.debug("Day wide optimization has been successfull")
                 else:
                     self._logger.warning("Day wide optimization failed")
+
+                await asyncio.sleep(delay = 86400)                                  # Sleep for 24 hours before repeating this procedure
         except asyncio.CancelledError:
             self._logger.debug("Periodic DB optimization routine terminated gracefully")
         except Exception:
