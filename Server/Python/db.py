@@ -637,4 +637,82 @@ class MySQL:
         else:                                                                           # This table doesn't exixt or it doesn't support optimization
             return False
 
-             
+    async def getUserList(self) -> dict:
+        '''
+        Wrapper to read the People table and format data into a convenient dictionary
+        '''
+
+        # Read the DB table and get a list of tuple
+        try:
+            rawData = await self.readData(tableName = self._SUPPORTED_DB_TABLES[2])
+        except Exception:
+            self._logger.error("An error occurred while reading the People table from getUserList", exc_info = True)
+
+        # Create the dictionary that will store the formatted data
+        formattedData = dict()
+
+        # For each user, store the info. In case of error on a single user, just ignore it
+        for user in rawData:
+            try:
+                formattedData[user[0]]["Name"] = user[1]
+                formattedData[user[0]]["Surname"] = user[2]
+            except IndexError:
+                continue
+            except Exception:
+                self._logger.warning("An unknown error occurred while formatting users fetched from People table")
+                continue
+
+        return formattedData
+        
+    async def getSensorsByUser(self, ID: int) -> tuple:
+        '''
+        Get a tuple of sensors' UID associated with a single user ID
+        '''
+
+        if type(ID) != int:
+            raise TypeError
+
+        # Get the tuple directly from DB
+        query = "SELECT Sensor FROM Updates WHERE Person = " + str(ID)
+
+        # Execute the query and fetch the result
+        try:
+            self._cursor.execute(query)
+            result = self._cursor.fetchall()
+            return result
+        except Exception:
+            self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
+            return tuple()
+
+    async def getUpdateByCity(self, cities: tuple) -> dict:
+        '''
+        Get a structured packet of records. Select the most recent record for each city in the list
+        '''
+
+        if type(cities) != tuple:
+            raise TypeError
+
+        # The result will be stored here
+        formattedData = dict()
+
+        # Create the query
+        query = "SELECT * FROM %s R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM %s R2 WHERE R2.UID = R1.UID) AND R1.UID IN %s"
+        val = [self._SUPPORTED_DB_TABLES[0], self._SUPPORTED_DB_TABLES[0], cities]
+
+        # For each city, request the data
+        try:
+            self._cursor.execute(query, val)
+            result = self._cursor.fetchall()
+        except Exception:
+            self._logger.warning("Error occurred while fetching recordings by city", exc_info = True)
+            return dict()
+
+        # Format the fetched records
+        for record in result:
+            try:
+                formattedData[(record[0], record[1])] = {"Pressure" : record[2], "Temperature" : record[3], "Humidity" : record[4], "Ligth" : record[5]}
+            except Exception:
+                self._logger.warning("Error: Impossible to format a record fetched by city")
+                continue
+
+        return formattedData
