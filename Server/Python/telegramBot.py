@@ -62,8 +62,12 @@ class TelegramBot(threading.Thread):
 
         while self._isRunning == True:                                          # Of course if the thread is dead, this routine must return as well but we expect to cancel the task anyway
             
-            # This task must wake up every "botUpdatePeriod" hours to send all the updates
-            await asyncio.sleep(delay = self._system.settings["botUpdatePeriod"] * 3600)
+            try:
+                # This task must wake up every "botUpdatePeriod" hours to send all the updates
+                await asyncio.sleep(delay = self._system.settings["botUpdatePeriod"] * 3600)
+            except asyncio.CancelledError:
+                self._logger.debug("Periodic Telegram Task cancelled")
+                break
 
             # UserList dovrebbe essere un dizionario con tutte le info dell'utente.
             # Dal dizionario si tira fuori la chiave che è il chat id e si prendono i sensori, dai quali si prende il record più recente
@@ -82,8 +86,9 @@ class TelegramBot(threading.Thread):
             try:
                 if self._asyncLoop != None:
                     if self._periodicUpdateTask != None:
-                        self._periodicUpdateTask.cancel()                       # Cancel the periodic task
-                    self._asyncLoop.stop()                                      # Stop the event loop
+                        self._periodicUpdateTask.cancel()
+                        #self._asyncLoop.                       # Cancel the periodic task
+                    #self._asyncLoop.stop()                                      # Stop the event loop
             except Exception as e:
                 self._logger.critical("Impossible to gracefully terminate the Telegram Bot event loop!", exc_info = True)
                 raise e
