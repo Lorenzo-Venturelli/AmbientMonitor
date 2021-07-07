@@ -183,14 +183,19 @@ class TcpServer(threading.Thread):
 
         if self._asyncLoop != None:                                                 # If the async loop already exists
             if self._periodicDBTask != None:                                        # There is the periodic DB optimization routine 
-                self._periodicDBTask.cancel()                                       # Close it
+                self._asyncLoop.call_soon_threadsafe(self._periodicDBTask.cancel)
 
             self._asyncLoop.stop()                                                  # Stop the async loop. This won't wake up the system so let's fake a connection
 
             # The async loop is stopped so this connection will wake up the async ThreadPoolExecutor which will then terminate
-            fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
-            fakeClient.close()
+            try:
+                fakeClient = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                fakeClient.connect((self._system.settings["serverAddress"], self._system.settings["serverPort"]))
+                fakeClient.close()
+            except OSError:                                                         # Impossible to establish a connection, it means that the server is already closed
+                pass
+            except Exception:                                                       # Unknown exception
+                self._logger.error("Something happened while trying to close the TCP server throught a fake connection")
 
             self._db.close()                                                        # Close the connection to DB
         return

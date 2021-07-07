@@ -737,3 +737,19 @@ class MySQL:
                 continue
 
         return formattedData
+
+    async def getUserInfo(self, userID: int) -> tuple:
+        '''
+        Get a structured info pack about a single user
+        '''
+
+        if type(userID) != int:
+            raise TypeError
+
+        # Get the raw data
+        raw = await self.readData(tableName = "People", options = {"id" : userID})
+
+        if raw == []:
+            return tuple()
+        else:
+            return raw[0]
