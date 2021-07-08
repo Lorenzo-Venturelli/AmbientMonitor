@@ -1,4 +1,5 @@
 import time, datetime, threading, logging, asyncio
+from typing import Counter
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram.ext.dispatcher import run_async
 from telegram.ext.filters import MessageFilter
@@ -22,6 +23,7 @@ class TelegramBot(threading.Thread):
         self._db = MySQL(system = system, logger = logger)
         self._commandCallbacks = {
             "start"             :   self._welcomeUser,
+            "help"              :   self._helpUser,
             "register"          :   self._registerUser,
             "city_list"         :   self._cityList,
             "add_city"          :   self._newSub, 
@@ -59,8 +61,20 @@ class TelegramBot(threading.Thread):
         update.message.reply_text('''Welcome to AmbientMonitorBot! You can start to use this app typing /city_list to see''' +
             '''which cities are supported and then you can use one of the following commands:\n\n/register to start using our update system!\n\n''' + 
             '''/check_city to receive real time data from a city of your choice\n\n/get_stats to receive fancy visual statistics for a city\n\n''' +
-            '''/show_brief to have a complete view of what's going on right now in every city covered by our network\n\nAfter your registration you will''' +
-            '''also be able to add and remove cities to your watchlist by typing /add_city and /remove_city in order to receive automatic updates every''' +
+            '''/show_brief to have a complete view of what's going on right now in every city covered by our network\n\nAfter your registration you will ''' +
+            '''also be able to add and remove cities to your watchlist by typing /add_city and /remove_city in order to receive automatic updates every ''' +
+            '''4 hours.\nEnjoy!''')
+
+    def _helpUser(self, update: dict, context: object) -> None:
+        '''
+        Send help
+        '''
+
+        update.message.reply_text('''Welcome to AmbientMonitorBot! You can start to use this app typing /city_list to see''' +
+            '''which cities are supported and then you can use one of the following commands:\n\n/register to start using our update system!\n\n''' + 
+            '''/check_city to receive real time data from a city of your choice\n\n/get_stats to receive fancy visual statistics for a city\n\n''' +
+            '''/show_brief to have a complete view of what's going on right now in every city covered by our network\n\nAfter your registration you will ''' +
+            '''also be able to add and remove cities to your watchlist by typing /add_city and /remove_city in order to receive automatic updates every ''' +
             '''4 hours.\nEnjoy!''')
 
     def _registerUser(self, update: dict, context: object) -> None:
@@ -130,7 +144,32 @@ class TelegramBot(threading.Thread):
         return
 
     def _cityList(self, update: dict, context: object) -> None:
-        pass
+        '''
+        Send a list of supported cities
+        '''
+
+        # Get a list of registered sensors
+        try:
+            cityList = asyncio.run_coroutine_threadsafe(self._db.getCityList(), loop = self._asyncLoop).result(60)
+        except asyncio.TimeoutError:
+            cityList = None
+        except Exception:
+            self._logger.warning("Impossible to get a city list")
+            cityList = None
+
+        # Check the result
+        if cityList == tuple():                                     # No city is currently supported
+            update.message.reply_text("There is no city currently active in our network... Try again tomorrow! We are working hard right now")
+        elif cityList == None:                                      # An error occurred
+            update.message.reply_text("Sorry... Something went wrong. I couldn't get the list of supported cities you're waiting for...")
+        else:                                                       # We have the list
+            message = "The following cities are currently supported:\n"
+
+            # Build the message and then send it
+            for city in cityList:
+                message = message + "{city} - {country}\n".format(city = city[0], country = city[1])
+
+            update.message.reply_text(message)
 
     def _newSub(self, update: dict, context: object) -> None:
         pass

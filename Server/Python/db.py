@@ -498,6 +498,7 @@ class MySQL:
 
         try:
             self._cursor.execute(query)
+            self._handler.commit()                                                          # Commit changes to the DB to save them
             return True
         except Exception:
             self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
@@ -778,3 +779,34 @@ class MySQL:
             return tuple()
         else:
             return raw[0]
+
+    async def getCityList(self) -> tuple:
+        '''
+        Get a list (tuple) of supported city. Every entry is in the form (city, country)
+        '''
+
+        # Get a raw list of sensors, each represent a city
+        try:
+            raw = list()
+            raw = await self.readData(tableName = "Devices")
+        except Exception:
+            self._logger.warning("Impossible to get raw data of sensors's list")
+            raw = list()
+
+        # Prepare the formatted output
+        formattedData = list()
+
+        # Unless the list is empty, format it
+        for sensor in raw:
+            try:
+                formattedData.append((str(sensor[2]), str(sensor[1])))
+            except IndexError:
+                self._logger.debug("While formatting a city list, a sensor row raised an IndexError")
+                continue
+            except Exception:
+                self._logger.error("Unexpected error occurred while formatting a city list")
+                formattedData = list()
+                break
+
+        return tuple(formattedData)
+        
