@@ -1,4 +1,4 @@
-import threading, socket, logging, time, asyncio, json, datetime
+import threading, socket, logging, time, asyncio, json, datetime, random
 from interfaces import System, Data, Event, CryptoHandler
 from db import MySQL
 
@@ -8,6 +8,9 @@ class TcpServer(threading.Thread):
     _HANDSHAKE_REQUEST = b"199"
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
+    _TCP_DEVICE_INFO_REQUEST = b"210"
+    _TCP_SET_DEVICE_UID = b"220"
+    _TCP_TERMINATOR = ["\r\r", b"\r\r"]
 
     def __init__(self, data: object, event: object, system: object, logger: object):
         if (isinstance(event, Event) != True  or isinstance(data, Data) != True 
@@ -51,32 +54,36 @@ class TcpServer(threading.Thread):
         '''Execute connection's handshake. Return the keys in case of success, otherwise return (None, None)'''
 
         try:
-            writer.write(self._HANDSHAKE_REQUEST)                                           # Send handshake request to the client
+            writer.write(self._HANDSHAKE_REQUEST + self._TCP_TERMINATOR[1])                 # Send handshake request to the client
             await writer.drain()
             
-            if await asyncio.wait_for(reader.read(1024), timeout = 5) == self._TCP_ACK_OK:  # Client has got the request and it's ready
+            # Client has got the request and it's ready
+            if await asyncio.wait_for(reader.readuntil(separator = self._TCP_TERMINATOR[1]), timeout = 5) == self._TCP_ACK_OK + self._TCP_TERMINATOR[1]:
 
-                writer.write(str(self._system.settings["RSA"]).encode())                    # Send the RSA key length. This connection will use this key length
+                writer.write(str(self._system.settings["RSA"]).encode() + self._TCP_TERMINATOR[1])            # Send the RSA key length. This connection will use this key length
                 await writer.drain()
 
-                if await asyncio.wait_for(reader.read(1024), timeout = 5) == self._TCP_ACK_OK:  # Key length received and adopted
-                    writer.write(CryptoHandler.exportRSApub(pubkey = self._srvPubKey))          # Send the server's RSA public key
+                # Key length received and adopted
+                if await asyncio.wait_for(reader.readuntil(separator = self._TCP_TERMINATOR[1]), timeout = 5) == self._TCP_ACK_OK + self._TCP_TERMINATOR[1]:
+                    writer.write(CryptoHandler.exportRSApub(pubkey = self._srvPubKey) + self._TCP_TERMINATOR[1])        # Send the server's RSA public key
                     await writer.drain()
 
                     # Receive the AES key and use the server's private RSA key to decrypt is
-                    aesKey = CryptoHandler.RSAdecrypt(privkey = self._srvPrivKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), skipDecoding = True)
+                    aesKey = await asyncio.wait_for(reader.readuntil(separator = self._TCP_TERMINATOR[1]), timeout = 5)
+                    aesKey = CryptoHandler.RSAdecrypt(privkey = self._srvPrivKey, secret = aesKey[0:-2], skipDecoding = True)
 
                     if aesKey != None:                                                      # AES key received and successfully decrypted
-                        writer.write(self._TCP_ACK_OK)                                      # Send ACK
+                        writer.write(self._TCP_ACK_OK + self._TCP_TERMINATOR[1])            # Send ACK
                         await writer.drain()
 
                         # Receive the client RSA public key and use the AES key to decrypt it
-                        cltPubKey = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = True)
+                        cltPubKey = await asyncio.wait_for(reader.readuntil(separator = self._TCP_TERMINATOR[1]), timeout = 5)
+                        cltPubKey = CryptoHandler.AESdecrypt(key = aesKey, secret = cltPubKey[0:-2], byteObject = True)
                         
-                        if cltPubKey != None:                                               # If the RSA public key is successfully received
+                        if cltPubKey != False:                                              # If the RSA public key is successfully received
                             cltPubKey = CryptoHandler.importRSApub(PEMfile = cltPubKey)     # Import it
 
-                            writer.write(self._TCP_ACK_OK)                                  # Handshake completed successfully, send the last ACK
+                            writer.write(self._TCP_ACK_OK + self._TCP_TERMINATOR[1])        # Handshake completed successfully, send the last ACK
                             await writer.drain()
 
                             return (cltPubKey, aesKey)
@@ -99,6 +106,23 @@ class TcpServer(threading.Thread):
             self._logger.error("Error occurred during TCP handshake", exc_info = True)
             return (None, None)
 
+    async def _send(self, data: object, aesKey: object, writer: object, byteObject: bool = False) -> None:
+        if type(byteObject) != bool:
+            raise TypeError
+
+        data = CryptoHandler.AESencrypt(key = aesKey, raw = data, byteObject = byteObject) + self._TCP_TERMINATOR[1]
+        writer.write(data)
+        await writer.drain()
+        return
+
+    async def _recv(self, aesKey: object, reader: object, byteObject: bool = False) -> object:
+        if type(byteObject) != bool:
+            raise TypeError
+
+        data = await asyncio.wait_for(reader.readuntil(separator = self._TCP_TERMINATOR[1]), timeout = 5)
+        data = CryptoHandler.AESdecrypt(key = aesKey, secret = data[0:-2], byteObject = byteObject)
+        return data
+
     async def _handle_connection(self, reader, writer) -> None:
         '''Handle a TCP client connection'''
 
@@ -107,21 +131,126 @@ class TcpServer(threading.Thread):
 
         if cltPubKey != None and aesKey != None:
             try:
-                clientUID = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = False)
+                clientUID = await self._recv(aesKey = aesKey, reader = reader, byteObject = False)
                 if len(clientUID) == 10:
-                    writer.write(CryptoHandler.AESencrypt(key = aesKey, raw = self._TCP_ACK_OK, byteObject = True))
-                    await writer.drain()
-                    sensorData = CryptoHandler.AESdecrypt(key = aesKey, secret = await asyncio.wait_for(reader.read(1024), timeout = 5), byteObject = True)
+                    await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                    sensorData = await self._recv(aesKey = aesKey, reader = reader, byteObject = False)
                     sensorData = json.loads(sensorData)
                     if type(sensorData) == dict:
-                        # Da introdurre loop per invio comandi prima di mandare l'ok che poi chiude la connessione
+                        # Now that we have both UID and data, let's check if there is something to do
+                        if int(clientUID) == 0 or len(str(clientUID)) != 10:                                             # This device has never been configured
+                            try:
+                                # Request info about this device
+                                await self._send(data = self._TCP_DEVICE_INFO_REQUEST, aesKey = aesKey, writer = writer, byteObject = True)
+
+                                # Decode the info
+                                try:
+                                    deviceInfo = await self._recv(aesKey = aesKey, reader = reader, byteObject = False)
+                                    deviceInfo = json.loads(deviceInfo)
+                                except Exception:
+                                    self._logger.debug("Device info not received")
+                                    raise Exception
+
+                                # Check in the DB
+                                try:
+                                    storedDeviceInfo = await self._db.getSensorInfo(city = deviceInfo["City"], country = deviceInfo["Country"])
+                                except KeyError:
+                                    self._logger.debug("Received device info are in a broken format")
+                                    storedDeviceInfo = None
+                                except Exception:
+                                    self._logger.warning("An error occurred while getting device info")
+                                    storedDeviceInfo = None
+                                
+                                if storedDeviceInfo == tuple():                             # This device do not exist in our system
+                                    newUID = str(random.randint(1000000000, 9999999999))    # Generate a new random UID for this device
+                                    try:                                                    # Record this device into our system
+                                        await self._db.insertData(tableName = "Devices", data = {newUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
+                                    except Exception:                                       # We couldn't record this device so we can't go on
+                                        self._logger.warning("An error occurred while recording a new device into the DB")
+                                        await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                                        writer.close()
+                                        await writer.wait_closed()
+                                        return
+                                    clientUID = newUID                                      # Data received from this device must be recorded with the new UID
+                                elif storedDeviceInfo == None:                              # We couldn't get info from this device so we can't record these data, just kill the connection
+                                    await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                                    writer.close()
+                                    await writer.wait_closed()
+                                    self._logger.debug("Connection closed with client " + str(writer.get_extra_info("peername")))
+                                    return
+                                else:
+                                    clientUID = str(storedDeviceInfo[0])
+                                
+                                # Now that we have a valid UID to set, notify our intention
+                                await self._send(data = self._TCP_SET_DEVICE_UID, aesKey = aesKey, writer = writer, byteObject = True)
+
+                                # Wait an ACK from the device. If it's arrive, send the new UID
+                                try:
+                                    answer = await self._recv(aesKey = aesKey, reader = reader, byteObject = True)
+                                except Exception:
+                                    answer = None
+
+                                if answer == self._TCP_ACK_OK:
+                                    await self._send(data = clientUID, aesKey = aesKey, writer = writer, byteObject = False)
+
+                                    # Check if everything is okay
+                                    try:
+                                        answer = await self._recv(aesKey = aesKey, reader = reader, byteObject = True)
+                                    except Exception:
+                                        answer = None
+
+                                    if answer != self._TCP_ACK_OK:
+                                        self._logger.debug("Last ACK for update UID not received")
+                                        raise Exception
+                                else:
+                                    self._logger.debug("First ACK for update UID not received")
+                                    raise Exception
+                            except Exception:
+                                self._logger.warning("Impossible to configure a device. Data lost")
+                                await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                                writer.close()
+                                await writer.wait_closed()
+                                self._logger.debug("Connection closed with client " + str(writer.get_extra_info("peername")))
+                                return
+                        elif int(clientUID) != 0 and len(str(clientUID)) == 10:             # This client is configured, let's check if it exists in our system
+                                # Check in the DB
+                                try:
+                                    storedDeviceInfo = await self._db.getSensorInfo(UID = int(clientUID))
+                                except KeyError:
+                                    self._logger.debug("Received device info are in a broken format")
+                                    storedDeviceInfo = None
+                                except Exception:
+                                    self._logger.warning("An error occurred while getting device info")
+                                    storedDeviceInfo = None
+
+                                # If we don't have this device in our DB, request info and store it
+                                if storedDeviceInfo == None:
+                                    # Request info about this device
+                                    await self._send(data = self._TCP_DEVICE_INFO_REQUEST, aesKey = aesKey, writer = writer, byteObject = True)
+
+                                    # Decode the info
+                                    try:
+                                        deviceInfo = await self._recv(aesKey = aesKey, reader = reader, byteObject = False)
+                                        deviceInfo = json.loads(deviceInfo)
+                                    except Exception:
+                                        self._logger.debug("Device info not received")
+                                        raise Exception
+
+                                    try:                                                    # Record this device into our system
+                                        await self._db.insertData(tableName = "Devices", data = {clientUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
+                                    except Exception:                                       # We couldn't record this device so we can't go on
+                                        self._logger.warning("An error occurred while recording a new device into the DB")
+                                        await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                                        writer.close()
+                                        await writer.wait_closed()
+                                        return
+                                    
                         # Create a new task in background to insert data into the DB without blocking
                         self._asyncLoop.create_task(self._db.insertData(tableName = "Recordings", data = {"UID" : clientUID, "values" : sensorData}))
-                        writer.write(CryptoHandler.AESencrypt(key = aesKey, raw = self._TCP_ACK_OK, byteObject = True))
-                        await writer.drain()
+                        await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
+                        self._logger.debug("Data recorded for device UID = " + str(clientUID))
                     else:
-                        writer.write(CryptoHandler.AESencrypt(key = aesKey, raw = self._TCP_ACK_ERROR, byteObject = True))
-                        await writer.drain()
+                        await self._send(data = self._TCP_ACK_ERROR, aesKey = aesKey, writer = writer, byteObject = True)
                         self._logger.warning("Sensors data are unreadable from client " + str(writer.get_extra_info("peername")))
                     
                     writer.close()

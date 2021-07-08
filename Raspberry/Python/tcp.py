@@ -7,6 +7,9 @@ class TcpClient(threading.Thread):
     _HANDSHAKE_REQUEST = b"199"
     _TCP_ACK_OK = b"200"
     _TCP_ACK_ERROR = b"400"
+    _TCP_DEVICE_INFO_REQUEST = b"210"
+    _TCP_SET_DEVICE_UID = b"220"
+    _TCP_TERMINATOR = ["\r\r", b"\r\r"]
 
     def __init__(self,  data: object, event: object, system: object, logger: object):
         if (isinstance(event, Event) != True  or isinstance(data, Data) != True 
@@ -67,23 +70,23 @@ class TcpClient(threading.Thread):
         '''Execute the connection's handshake'''
 
         try:
-            msg = self._handler.recv(1024)                                  # Wait the server to request handshake
-            if msg == self._HANDSHAKE_REQUEST:                              # Handshake request
-                self._handler.sendall(self._TCP_ACK_OK)                     # Asnwer that we are ready
+            msg = self._handler.recv(2048)                                                      # Wait the server to request handshake
+            if msg == self._HANDSHAKE_REQUEST + self._TCP_TERMINATOR[1]:                        # Handshake request
+                self._handler.sendall(self._TCP_ACK_OK + self._TCP_TERMINATOR[1])               # Asnwer that we are ready
 
-                msg = self._handler.recv(1024)                              # Get RSA keys length
+                msg = self._handler.recv(2048)                              # Get RSA keys length
                 if msg != None and msg != 0 and msg != '' and msg != b'':   # Valid message
-                    msg = int(msg.decode())
+                    msg = int(msg.decode().replace(self._TCP_TERMINATOR[0], ''))
 
                     if msg in CryptoHandler.RSA_LENGTH:                                         # Key length is supported
                         if msg != self._system.settings["RSA"]:                                 # If the key length is different
                             self._system.updateSettings(newSettings = {"RSA" : msg})            # Update the RSA key settings
-                        self._handler.sendall(self._TCP_ACK_OK)                                 # Acknowledge the reception
+                        self._handler.sendall(self._TCP_ACK_OK + self._TCP_TERMINATOR[1])       # Acknowledge the reception
                     else:                                                                       # Key length not supported, handshake failed
-                        self._handler.sendall(self._TCP_ACK_ERROR)                              # Notify the problem
+                        self._handler.sendall(self._TCP_ACK_ERROR + self._TCP_TERMINATOR[1])    # Notify the problem
                         return False
 
-                    msg = self._handler.recv(1024)                                              # Get the server public key
+                    msg = self._handler.recv(2048)                                              # Get the server public key
                     self._srvPubKey = CryptoHandler.importRSApub(PEMfile = msg)                 # Import it
 
                     # Generate a new random AES key
@@ -93,22 +96,22 @@ class TcpClient(threading.Thread):
                     (self._cltPubKey, self._cltPrivKey) = CryptoHandler.generateRSA(length = self._system.settings["RSA"])
 
                     # Encrypt the AES key with the server's public RSA key
-                    msg = CryptoHandler.RSAencrypt(pubkey = self._srvPubKey, raw = self._aesKey)
+                    msg = CryptoHandler.RSAencrypt(pubkey = self._srvPubKey, raw = self._aesKey) + self._TCP_TERMINATOR[1]
 
                     self._handler.sendall(msg)                              # Send the encrypted AES key
-                    msg = self._handler.recv(1024)
-                    if msg == self._TCP_ACK_OK:                             # Server confirmed reception
+                    msg = self._handler.recv(2048)
+                    if msg == self._TCP_ACK_OK + self._TCP_TERMINATOR[1]:   # Server confirmed reception
                         
                         # Encrypt this client RSA pubkey with the shared AES key
-                        msg = CryptoHandler.AESencrypt(key = self._aesKey, raw = CryptoHandler.exportRSApub(pubkey = self._cltPubKey), byteObject = True)
+                        msg = CryptoHandler.AESencrypt(key = self._aesKey, raw = CryptoHandler.exportRSApub(pubkey = self._cltPubKey), byteObject = True) + self._TCP_TERMINATOR[1]
                         self._handler.sendall(msg)
-                        msg = self._handler.recv(1024)
-                        if msg == self._TCP_ACK_OK:                         # Server confirmed reception
+                        msg = self._handler.recv(2048)
+                        if msg == self._TCP_ACK_OK + self._TCP_TERMINATOR[1]:   # Server confirmed reception
                             self._logger.debug("TCP handshake done")
-                            return True                                     # Handshake completed successfully
+                            return True                                         # Handshake completed successfully
 
             # If something goes wrong, the handshake fail and all the keys are destoryed. The problem is notified
-            self._handler.sendall(self._TCP_ACK_ERROR)
+            self._handler.sendall(self._TCP_ACK_ERROR + self._TCP_TERMINATOR[1])
             raise Exception("Handshake failed")                                               
         except Exception:                                                   # In case of error, restore default settings
             self._logger.error("Error occurred during TCP handshake", exc_info = True)
@@ -136,17 +139,19 @@ class TcpClient(threading.Thread):
         if type(byteObject) != bool:
             raise TypeError
 
-        return self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = data, byteObject = byteObject))
+        return self._handler.sendall(CryptoHandler.AESencrypt(key = self._aesKey, raw = data, byteObject = byteObject) + self._TCP_TERMINATOR[1])
 
     def _receive(self, byteObject: bool = False) -> object:
 
         if type(byteObject) != bool:
             raise TypeError
 
-        message = self._handler.recv(1024)                                                                      # Receive data
+        message = self._handler.recv(2048)                                                                      # Receive data
 
         if message == None or message == '' or message == b'':                                                  # If nothing has been received, return None
             return None
+        
+        message = message[0:-2]
         
         return CryptoHandler.AESdecrypt(key = self._aesKey, secret = message, byteObject = byteObject)          # Decrypt the message
 
@@ -179,11 +184,27 @@ class TcpClient(threading.Thread):
                         self._send(data = sensorsData)
                         
                         while True:                                                                 # Commands loop
-                            if self._receive(byteObject = True) == self._TCP_ACK_OK:                # Standard acknowledge
+                            answer = self._receive(byteObject = True)                               # Get the server asnwer
+                            if answer == self._TCP_ACK_OK:                                          # Standard acknowledge
                                 self._data.remove(itemName = "sampledData")                                                 # Delete data because we have already sent them
                                 self._data.store(itemName = "dataReady", item = False, itemType = "bool")                   # Update status flag
                                 break
-                            else:                                                                                           # Unkown answer, close connection 
+                            elif answer == self._TCP_DEVICE_INFO_REQUEST:                           # The server requested info about this device
+                                deviceInfo = {"Country" : self._system.settings["Country"], "City" : self._system.settings["City"]}
+                                deviceInfo = json.dumps(deviceInfo)
+
+                                self._send(data = deviceInfo)
+                            elif answer == self._TCP_SET_DEVICE_UID:                                # The server wants to update this device's UID
+                                self._send(data = self._TCP_ACK_OK, byteObject = True)
+
+                                newUID = self._receive(byteObject = False)                          # Get the new UID
+
+                                if len(str(newUID)) == 10:                                          # This is a valid UID
+                                    self._system.updateSettings(newSettings = {"UID" : newUID})
+                                    self._send(data = self._TCP_ACK_OK, byteObject = True)
+                                else:
+                                    self._logger.warning("Received an invalid UID: " + str(newUID))
+                            else:                                                                   # Unkown answer, close connection 
                                 self._logger.warning("Unknown answer from the TCP server")
                                 break
                     except socket.timeout:                                              # No answer from server

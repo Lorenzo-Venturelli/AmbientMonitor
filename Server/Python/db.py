@@ -308,62 +308,56 @@ class MySQL:
                 if "uidList" in options.keys():                                             # Read only specified UIDs
                     if type(options["uidList"]) != list:
                         raise TypeError
-                    if queryLen < len(query):
-                        query = query + " AND ("
-                    else:
-                        query = query + "("
 
-                    tmpLen = len(query)
+                    if len(options["uidList"]) > 0:                                         # There is something here
+                        if queryLen < len(query):
+                            query = query + " AND "
+
+                        query = query + "UID IN ("
+
                     for uid in options["uidList"]:                                          # For each UID, update the query
                         if type(uid) != int:
                             raise TypeError
 
-                        if tmpLen < len(query):
-                            query = query + " OR "
-                        
-                        query = query + "UID = " + str(uid)
+                        query = query + "{uid},".format(uid = str(uid))
                     
-                    query = query + ")"
+                    query = query[0:-1] + ")"                                               # Substitute the last comma with a bracket
                 
                 if "cityList" in options.keys():                                            # Devices from the specified cities
                     if type(options["cityList"]) != list:
                         raise TypeError
-                    if queryLen < len(query):
-                        query = query + " AND ("
-                    else:
-                        query = query + "("
 
-                    tmpLen = len(query)
+                    if len(options["cityList"]) > 0:                                        # There is something here
+                        if queryLen < len(query):
+                            query = query + " AND "
+
+                        query = query + "City IN ("
+
                     for city in options["cityList"]:                                        # For each City, update the query
-                        if type(city) != int:
+                        if type(city) != str:
                             raise TypeError
 
-                        if tmpLen < len(query):
-                            query = query + " OR "
-                        
-                        query = query + "City = " + str(city)
+                        query = query + ''''{city}','''.format(city = str(city))
                     
-                    query = query + ")"
+                    query = query[0:-1] + ")"                                               # Substitute the last comma with a bracket
 
                 if "countryList" in options.keys():                                         # Devices from the specified countries
                     if type(options["countryList"]) != list:
                         raise TypeError
-                    if queryLen < len(query):
-                        query = query + " AND ("
-                    else:
-                        query = query + "("
 
-                    tmpLen = len(query)
-                    for country in options["countryList"]:                                  # For each country, update the query
-                        if type(country) != int:
+                    if len(options["countryList"]) > 0:                                     # There is something here
+                        if queryLen < len(query):
+                            query = query + " AND "
+
+                        query = query + "Country IN ("
+
+                    for country in options["countryList"]:                                  # For each Country, update the query
+                        if type(country) != str:
                             raise TypeError
 
-                        if tmpLen < len(query):
-                            query = query + " OR "
-                        
-                        query = query + "Country = " + str(country)
+                        query = query + ''''{country}','''.format(country = str(country))
                     
-                    query = query + ")"
+                    query = query[0:-1] + ")"                                               # Substitute the last comma with a bracket
 
                 if len(query) == queryLen:                                                  # No valid option detected, revert to the original query
                     query = "SELECT * FROM Devices"
@@ -748,6 +742,37 @@ class MySQL:
 
         # Get the raw data
         raw = await self.readData(tableName = "People", options = {"id" : userID})
+
+        if raw == []:
+            return tuple()
+        else:
+            return raw[0]
+
+    async def getSensorInfo(self, UID: int = None, city: str = None, country: str = None) -> tuple:
+        '''
+        Get info about the requested device if it exists in our database
+        '''
+
+        if (UID != None and type(UID) != int) or (city != None and type(city) != str) or (country != None and type(country) != str):
+            raise TypeError
+
+        # Build the options set
+        options = dict()
+        if UID != None:
+            options["uidList"] = [UID]
+        
+        if city != None:
+            options["cityList"] = [city]
+
+        if country != None:
+            options["countryList"] = [country]
+
+        # Get the raw data
+        try:
+            raw = await self.readData(tableName = "Devices", options = options)
+        except Exception as e:
+            print(e)
+            raw = list()
 
         if raw == []:
             return tuple()
