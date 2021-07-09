@@ -1,4 +1,4 @@
-import time, copy, threading, logging
+import time, copy, threading, logging, subprocess
 from interfaces import Data, Event, System
 try:
     import board, adafruit_dht as DHT22, adafruit_bh1750 as BH1750, Adafruit_BMP.BMP085 as BMP185
@@ -11,6 +11,7 @@ except Exception as e:
 class Sensors(threading.Thread):
     
     _TEMP_SENSOR_PIN = board.D26
+    _MAX_SENSOR_FAILURE = 5
 
     def __init__(self, data: object, event: object, system: object, logger: object):
         if isinstance(event, Event) != True  or isinstance(data, Data) != True or isinstance(system, System) != True:
@@ -27,6 +28,7 @@ class Sensors(threading.Thread):
         self._periodicClb = None                                                            # Periodic callback
         self._isRunning = True
         self._event.createEvent(eventName = "readSensors")                                  # Polling event
+        self._consecutiveFailure = 0                                                        # Keep track of consecutive sensors' reading failure
         super().__init__(daemon = False)
 
     
@@ -55,6 +57,7 @@ class Sensors(threading.Thread):
         self._periodicClb = threading.Timer(interval = (self._system.settings["samplingSpeed"] * 60), function = self._executePolling)
         self._periodicClb.start()
         self._logger.debug("Sensors' thread started")
+        self._consecutiveFailure = 0
 
         while True:
             self._event.pend(eventName = "readSensors")                                     # Wait the periodic event
@@ -74,12 +77,17 @@ class Sensors(threading.Thread):
                     newData["humidity"] = round(self._sensorsList["T&H"].humidity, 1)
                     newData["ligth"] = round(self._sensorsList["L"].lux, 3)
                     success = True
+                    self._consecutiveFailure = 0                                            # This reading went well, reset this counter
                 except RuntimeError:                                                        # Just a silly runtime error
                     self._logger.debug("RuntimeError while reading sensors")
                 except Exception:                                                           # Unexpected error, stop this reading 
-                    self._logger.error("Sensors read failed", exc_info = True)
+                    self._consecutiveFailure = self._consecutiveFailure + 1
+                    self._logger.error("Sensors read failed for {number} times in a row".format(number = str(self._consecutiveFailure)))
                     break
             
+            if self._consecutiveFailure == self._MAX_SENSOR_FAILURE:                        # Too many failure, reboot the system
+                subprocess.run(["sudo", "reboot"])
+
             if success == False:                                                            # If the reading has been aborted, skip this iteration
                 continue
 
