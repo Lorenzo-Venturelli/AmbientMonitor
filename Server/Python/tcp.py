@@ -164,7 +164,7 @@ class TcpServer(threading.Thread):
                                 if storedDeviceInfo == tuple():                             # This device do not exist in our system
                                     newUID = str(random.randint(1000000000, 9999999999))    # Generate a new random UID for this device
                                     try:                                                    # Record this device into our system
-                                        await self._db.insertData(tableName = "Devices", data = {newUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
+                                        await self._insertDataIntoDB(tableName = "Devices", data = {newUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
                                     except Exception:                                       # We couldn't record this device so we can't go on
                                         self._logger.warning("An error occurred while recording a new device into the DB")
                                         await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
@@ -237,7 +237,7 @@ class TcpServer(threading.Thread):
                                         raise Exception
 
                                     try:                                                    # Record this device into our system
-                                        await self._db.insertData(tableName = "Devices", data = {clientUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
+                                        await self._insertDataIntoDB(tableName = "Devices", data = {clientUID : {"country" : deviceInfo["Country"], "city" : deviceInfo["City"]}})
                                     except Exception:                                       # We couldn't record this device so we can't go on
                                         self._logger.warning("An error occurred while recording a new device into the DB")
                                         await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
@@ -246,7 +246,7 @@ class TcpServer(threading.Thread):
                                         return
                                     
                         # Create a new task in background to insert data into the DB without blocking
-                        self._asyncLoop.create_task(self._db.insertData(tableName = "Recordings", data = {"UID" : clientUID, "values" : sensorData}))
+                        self._asyncLoop.create_task(self._insertDataIntoDB(tableName = "Recordings", data = {"UID" : clientUID, "values" : sensorData}))
                         await self._send(data = self._TCP_ACK_OK, aesKey = aesKey, writer = writer, byteObject = True)
                         self._logger.debug("Data recorded for device UID = " + str(clientUID))
                     else:
@@ -272,6 +272,23 @@ class TcpServer(threading.Thread):
             writer.close()
             await writer.wait_closed()
             return
+
+    async def _insertDataIntoDB(self, tableName: str, data: dict) -> None:
+        '''
+        Insert the given data into the specified table. In case of error, try to rebuild the DB connection
+        '''
+
+        if type(tableName) != str or type(data) != dict:
+            raise TypeError
+
+        try:
+            if await self._db.insertData(tableName = tableName, data = data) == False:          # Something went wrong with the connection
+                self._logger.warning("An error occurred while inserting data into DB in table {table}".format(table = tableName))
+                self._db.close()
+                self._db.open()
+                await self._db.insertData(tableName = tableName, data = data)                   # Try to insert these data again
+        except Exception:
+            self._logger.error("Unexpected error while inserting data into DB", exc_info = True)
 
     async def _optimizeDB(self) -> None:
         '''
