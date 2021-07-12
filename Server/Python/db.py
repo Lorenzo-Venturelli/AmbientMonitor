@@ -468,7 +468,7 @@ class MySQL:
                     raise TypeError
 
                 query = query + " WHERE ID = " + str(options["id"])
-        elif tableName == self._SUPPORTED_DB_TABLES[2]:                                     # Updates
+        elif tableName == self._SUPPORTED_DB_TABLES[3]:                                     # Updates
             query = "DELETE FROM Updates"
 
             if options != dict():

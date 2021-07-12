@@ -9,7 +9,7 @@ from db import MySQL
 class TelegramBot(threading.Thread):
     _AUTH_TOKEN = "1830886980:AAEY8fGLTn9uY0qLKhaZ7T29HgLMuMlU1Yo"
     _DEFAULT_TELEGRAM_BOT_SETTINGS = {"botUpdatePeriod" : 4}
-    _SUPPORTED_TELEGRAM_COMMANDS = ["start", "register", "city_list", "add_city", "remove_city", "check_city", "get_stats", "show_brief"]
+    _SUPPORTED_TELEGRAM_COMMANDS = ["start","help", "register", "city_list", "add_city", "remove_city", "check_city", "get_stats", "show_brief"]
 
     def __init__(self, data: object, event: object, system: object, logger: object):
         if (isinstance(event, Event) != True  or isinstance(data, Data) != True 
@@ -22,15 +22,15 @@ class TelegramBot(threading.Thread):
         self._logger = logger
         self._db = MySQL(system = system, logger = logger)
         self._commandCallbacks = {
-            "start"             :   self._welcomeUser,
-            "help"              :   self._helpUser,
-            "register"          :   self._registerUser,
-            "city_list"         :   self._cityList,
-            "add_city"          :   self._newSub, 
-            "remove_city"       :   self._removeSub,
-            "check_city"        :   self._getUpdate, 
-            "get_stats"         :   self._getStats, 
-            "show_brief"        :   self._showBrief
+            self._SUPPORTED_TELEGRAM_COMMANDS[0]    :   self._welcomeUser,
+            self._SUPPORTED_TELEGRAM_COMMANDS[1]    :   self._helpUser,
+            self._SUPPORTED_TELEGRAM_COMMANDS[2]    :  self._registerUser,
+            self._SUPPORTED_TELEGRAM_COMMANDS[3]    :   self._cityList,
+            self._SUPPORTED_TELEGRAM_COMMANDS[4]    :   self._newSub, 
+            self._SUPPORTED_TELEGRAM_COMMANDS[5]    :   self._removeSub,
+            self._SUPPORTED_TELEGRAM_COMMANDS[6]    :   self._getUpdate, 
+            self._SUPPORTED_TELEGRAM_COMMANDS[7]    :   self._getStats, 
+            self._SUPPORTED_TELEGRAM_COMMANDS[8]    :   self._showBrief
         }
 
         for item in self._DEFAULT_TELEGRAM_BOT_SETTINGS.keys():
@@ -185,10 +185,10 @@ class TelegramBot(threading.Thread):
         try:
             userID = update.message.chat.id
         except KeyError:                                            # There is something wrong in the context, this message can't be processed
-            self._logger.warning("Impossible to get the chat ID from the context - /register")
+            self._logger.warning("Impossible to get the chat ID from the context - /add_city")
             userID = None
         except Exception:                                           # There is something really wrong here, abort this callback
-            self._logger.error("Unexpected error occurred while getting the chat ID from the context - /register")
+            self._logger.error("Unexpected error occurred while getting the chat ID from the context - /add_city")
             return
 
         if userID == None:                                          # We can't proceed without the unique chat ID
@@ -201,7 +201,7 @@ class TelegramBot(threading.Thread):
         except asyncio.TimeoutError:
             user = None
         except Exception:
-            self._logger.warning("Something went wrong while getting info about a user - /register")
+            self._logger.warning("Something went wrong while getting info about a user - /add_city")
             user = None
 
         if user == None:                                            # The DB didn't provide us informations
@@ -308,7 +308,131 @@ class TelegramBot(threading.Thread):
 
 
     def _removeSub(self, update: dict, context: object) -> None:
-        pass
+        '''
+        Allow an existing user to remove one or more cities from its update list
+        '''
+
+        # Get the User ID from the enviornment. It is the unique Telegram Chat ID.
+        try:
+            userID = update.message.chat.id
+        except KeyError:                                            # There is something wrong in the context, this message can't be processed
+            self._logger.warning("Impossible to get the chat ID from the context - /remove_city")
+            userID = None
+        except Exception:                                           # There is something really wrong here, abort this callback
+            self._logger.error("Unexpected error occurred while getting the chat ID from the context - /remove_city")
+            return
+
+        if userID == None:                                          # We can't proceed without the unique chat ID
+            update.message.reply_text("Sorry but something went wrong, we can't get your ChatID. Reopen Telegram and try again")
+            return
+
+        # Try to get info about this user from the DB
+        try:
+            user = asyncio.run_coroutine_threadsafe(self._db.getUserInfo(userID = userID), loop = self._asyncLoop).result(60)
+        except asyncio.TimeoutError:
+            user = None
+        except Exception:
+            self._logger.warning("Something went wrong while getting info about a user - /remove_city")
+            user = None
+
+        if user == None:                                            # The DB didn't provide us informations
+            update.message.reply_text("Sorry, apparently our system is overloaded at the moment... Please wait a few minutes and try again")
+            return
+        elif user == tuple():                                       # This user is not registered in our system
+            update.message.reply_text("To use this function, you need to be registered! Please type /register")
+            return
+        else:
+            try:
+                # Obtain a list of cities
+                userData = str(update.message.text).replace("/remove_city", "").replace(",", "").replace(";", "").split()
+                userData = list(map(lambda word: word.strip().capitalize(), userData))
+            except Exception:
+                self._logger.warning("Impossible to get a list of cities from the message - /remove_city")
+                userData = list()
+
+            if userData == list():                                  # The user didn't provice any city, save this active state
+                self._activeUserStateLock.acquire()
+                self._activeUserState[userID] = "remove_city"       # Save this user's state in order to keep processing this command when the next message arrives
+                self._activeUserStateLock.release()
+                update.message.reply_text("Please provide a list of cities that you want to remove, separated with a whitespace\nType /city_list so see which cities are supported")
+            else:                                                   # The user typed something inline
+                # Get a list of registered sensors
+                try:
+                    cityList = asyncio.run_coroutine_threadsafe(self._db.getCityList(), loop = self._asyncLoop).result(60)
+                except asyncio.TimeoutError:
+                    cityList = None
+                except Exception:
+                    self._logger.warning("Impossible to get a city list")
+                    cityList = None
+
+                if cityList == None:                                # Impossible to get a list of cities so we can't go on
+                    update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                    return
+                else:                                               # We have the cities' list
+                    valid = set()                                   # Keep track of valid cities to send a resume
+
+                    try:
+                        for city in cityList:                           # Compare each city to see if the user selected it
+                            if city[0] in userData:                     # The user tyed this city
+                                valid.add(city)                         # This city will be associated to this user
+                                userData.remove(city[0])                # Remove this city from his list
+                    except Exception:
+                        self._logger.warning("An error occurred while checking the prompted cities - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+                
+                    # Get a list of cities associated to this user
+                    try:
+                        existingUpdates = asyncio.run_coroutine_threadsafe(self._db.getUpdateListByUser(userID = int(userID)), loop = self._asyncLoop).result(60)
+                        existingUpdates = set(existingUpdates)
+                    except asyncio.TimeoutError:
+                        update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                        return
+                    except Exception:
+                        self._logger.warning("Impossible to insert into Updates table - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    # Build a list of cities to remove by subtracting the propmted cities to the list of existing updates
+                    removedCities = set()
+                    for city in valid:                                  # For each valid city given by the user
+                        if city in existingUpdates:                     # Check if the user was registered to that city
+                            existingUpdates.remove(city)                # If yes, remove it from the list of cities he's registered to
+                            removedCities.add(city)                     # Put in the list of removed cities
+
+                    # Build the resume message
+                    try:
+                        if existingUpdates != set():
+                            answerMessage = "All done!\nYou are now subscribed to these cities:\n"
+                            for city in existingUpdates:
+                                answerMessage = answerMessage + "- {cityName}\n".format(cityName = str(city[0]))
+                        else:
+                            answerMessage = "All done!\nYou are not subscribed to any city"
+                    except Exception:
+                        self._logger.warning("An error occurred while making the resume message - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    # Remove the selected cities from the DB
+                    try:
+                        # Try to update the DB
+                        for city in removedCities:
+                            if (asyncio.run_coroutine_threadsafe(self._db.removeData(tableName = "Updates", 
+                                options = {"person" : int(userID), "sensor" : int(city[2])}), loop = self._asyncLoop).result(60) != True):
+                                self._logger("Impossible to save the new updates preferencies - /add_city")
+                                update.message.reply_text("Sorry, something went wrong, we couldn't handle your request... Please try again")
+                                return
+                    except asyncio.TimeoutError:
+                        update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                        return
+                    except Exception:
+                        self._logger.warning("Impossible to remove data from into Updates table - /add_city", exc_info = True)
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    update.message.reply_text(answerMessage)
+                    return
+
 
     def _getUpdate(self, update: dict, context: object) -> None:
         pass
@@ -365,7 +489,7 @@ class TelegramBot(threading.Thread):
                 
                 try:
                     # Obtain a list of cities
-                    userData = str(update.message.text).replace("/add_city", "").replace(",", "").replace(";", "").split()
+                    userData = str(update.message.text).replace("/remove_city", "").replace(",", "").replace(";", "").split()
                     userData = list(map(lambda word: word.strip().capitalize(), userData))
                 except Exception:
                     self._logger.warning("Impossible to get a list of cities from the message - /add_city")
@@ -427,8 +551,6 @@ class TelegramBot(threading.Thread):
                         update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
                         return
 
-
-
                     # Insert data into DB
                     try:
                         validCities = dict()                        # Build a data structure suitable for the DB call
@@ -452,9 +574,98 @@ class TelegramBot(threading.Thread):
                         update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
 
                     return
-            else:                                                               # This active state is not actually supported
+            elif self._activeUserState[userID] == self._SUPPORTED_TELEGRAM_COMMANDS[5]:       # Remove city command
                 self._activeUserStateLock.acquire()
-                del self._activeUserState[userID]                       # Delete this weird state
+                del self._activeUserState[userID]                   # Remove the active state for this user
+                self._activeUserStateLock.release()
+
+                try:
+                    # Obtain a list of cities
+                    userData = str(update.message.text).replace("/add_city", "").replace(",", "").replace(";", "").split()
+                    userData = list(map(lambda word: word.strip().capitalize(), userData))
+                except Exception:
+                    self._logger.warning("Impossible to get a list of cities from the message - /remove_city")
+                    userData = list()
+
+                # Get a list of registered sensors
+                try:
+                    cityList = asyncio.run_coroutine_threadsafe(self._db.getCityList(), loop = self._asyncLoop).result(60)
+                except asyncio.TimeoutError:
+                    cityList = None
+                except Exception:
+                    self._logger.warning("Impossible to get a city list")
+                    cityList = None
+
+                if cityList == None:                                # Impossible to get a list of cities so we can't go on
+                    update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                    return
+                else:                                               # We have the cities' list
+                    valid = set()                                   # Keep track of valid cities to send a resume
+
+                    try:
+                        for city in cityList:                           # Compare each city to see if the user selected it
+                            if city[0] in userData:                     # The user tyed this city
+                                valid.add(city)                         # This city will be associated to this user
+                                userData.remove(city[0])                # Remove this city from his list
+                    except Exception:
+                        self._logger.warning("An error occurred while checking the prompted cities - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+                
+                    # Get a list of cities associated to this user
+                    try:
+                        existingUpdates = asyncio.run_coroutine_threadsafe(self._db.getUpdateListByUser(userID = int(userID)), loop = self._asyncLoop).result(60)
+                        existingUpdates = set(existingUpdates)
+                    except asyncio.TimeoutError:
+                        update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                        return
+                    except Exception:
+                        self._logger.warning("Impossible to insert into Updates table - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    # Build a list of cities to remove by subtracting the propmted cities to the list of existing updates
+                    removedCities = set()
+                    for city in valid:                                  # For each valid city given by the user
+                        if city in existingUpdates:                     # Check if the user was registered to that city
+                            existingUpdates.remove(city)                # If yes, remove it from the list of cities he's registered to
+                            removedCities.add(city)                     # Put in the list of removed cities
+
+                    # Build the resume message
+                    try:
+                        if existingUpdates != set():
+                            answerMessage = "All done!\nYou are now subscribed to these cities:\n"
+                            for city in existingUpdates:
+                                answerMessage = answerMessage + "- {cityName}\n".format(cityName = str(city[0]))
+                        else:
+                            answerMessage = "All done!\nYou are not subscribed to any city"
+                    except Exception:
+                        self._logger.warning("An error occurred while making the resume message - /remove_city")
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    # Remove the selected cities from the DB
+                    try:
+                        # Try to update the DB
+                        for city in removedCities:
+                            if (asyncio.run_coroutine_threadsafe(self._db.removeData(tableName = "Updates", 
+                                options = {"person" : int(userID), "sensor" : int(city[2])}), loop = self._asyncLoop).result(60) != True):
+                                self._logger("Impossible to save the new updates preferencies - /add_city")
+                                update.message.reply_text("Sorry, something went wrong, we couldn't handle your request... Please try again")
+                                return
+                    except asyncio.TimeoutError:
+                        update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+                        return
+                    except Exception:
+                        self._logger.warning("Impossible to remove data from into Updates table - /add_city", exc_info = True)
+                        update.message.reply_text("Sorry, an error occurred. We are already investigating the issue. Please try again later")
+                        return
+
+                    update.message.reply_text(answerMessage)
+                    return
+            else:                                                                               # This active state is not actually supported
+                self._activeUserStateLock.acquire()
+                del self._activeUserState[userID]                   # Delete this weird state
                 self._activeUserStateLock.release()
                 update.message.reply_text("I'm a bit lost... Could you please start again the thing you are trying to do?")
 
