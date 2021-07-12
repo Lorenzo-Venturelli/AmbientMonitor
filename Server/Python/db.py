@@ -180,7 +180,7 @@ class MySQL:
                     except Exception:
                         self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
                         continue
-        elif tableName == self._SUPPORTED_DB_TABLES[1]:
+        elif tableName == self._SUPPORTED_DB_TABLES[1]:             # Devices table
             # Write the query
             query = "INSERT INTO Devices VALUES (%s, %s, %s)"
 
@@ -196,7 +196,7 @@ class MySQL:
                 except Exception:
                     self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
                     continue
-        elif tableName == self._SUPPORTED_DB_TABLES[2]:
+        elif tableName == self._SUPPORTED_DB_TABLES[2]:             # People table
             # Write the query
             query = "INSERT INTO People VALUES (%s, %s, %s)"
 
@@ -212,7 +212,7 @@ class MySQL:
                 except Exception:
                     self._logger.warning("Impossible to execute the query: Insert into " + tableName, exc_info = True)
                     continue
-        elif tableName == self._SUPPORTED_DB_TABLES[3]:
+        elif tableName == self._SUPPORTED_DB_TABLES[3]:             # Updates table
             # Write the query
             query = "INSERT INTO Updates VALUES (%s, %s)"
 
@@ -266,7 +266,7 @@ class MySQL:
                     if queryLen < len(query):
                         query = query + " AND "
 
-                    query = query + "timestamp <= " + str(options["firstTime"])
+                    query = query + "timestamp >= " + str(options["firstTime"])
                 
                 if "lastTime" in options.keys():                                            # It is specified the final timestamp, read records that are older
                     if type(options["lastTime"]) != int:
@@ -274,7 +274,7 @@ class MySQL:
                     if queryLen < len(query):
                         query = query + " AND "
 
-                    query = query + "timestamp >= " + str(options["lastTime"])
+                    query = query + "timestamp <= " + str(options["lastTime"])
 
                 if "uidList" in options.keys():                                             # List of UIDs to request
                     if type(options["uidList"]) != list:
@@ -580,7 +580,7 @@ class MySQL:
                 for uid in uids:
                     tmpRecord = [0, uid, 0, 0, 0, 0]                                    # Let's create a new empty record that will store the computed average
                     iterations = 0                                                      # Number of records that will be substituted by this new one
-                    avgRecords["UID"] = uid
+                    avgRecords["UID"] = str(uid)
                     avgRecords["values"] = dict()
                     
                     # Let's analize each record, according to the period
@@ -605,7 +605,7 @@ class MySQL:
                                 tmpRecord[element] = tmpRecord[element] / iterations    # Calculate the average for each value
                             
                             # Now that we have calculated a summarized record associated to this block, let's save it in a valid format
-                            avgRecords["values"][str(tmpRecord[0])] = {"pressure" : tmpRecord[2], "temperature" : tmpRecord[3], "humidity" : tmpRecord[4], "light" : tmpRecord[5]}
+                            avgRecords["values"][str(tmpRecord[0])] = {"pressure" : tmpRecord[2], "temperature" : tmpRecord[3], "humidity" : tmpRecord[4], "ligth" : tmpRecord[5]}
                             
                             # Initialize a new block
                             newBlock = datetime.datetime.fromtimestamp(record[0])
@@ -620,8 +620,8 @@ class MySQL:
                         if await self.removeData(tableName = tableName, options = {"UID" : uid, "firstTime" : initialTime, "lastTime" : finalTime}) == True:
                             if await self.insertData(tableName = tableName, data = avgRecords) != True:
                                 raise Exception("Impossible to insert the new data, the processed blocks are lost!")
-                            else:
-                                raise Exception("Impossible to remove the raw records. Nothing has been lost")
+                        else:
+                            raise Exception("Impossible to remove the raw records. Nothing has been lost")
                     except Exception:
                         self._logger.error("An error occurred while updating the DB with optimized data", exc_info = True)
                         return False
@@ -799,7 +799,7 @@ class MySQL:
         # Unless the list is empty, format it
         for sensor in raw:
             try:
-                formattedData.append((str(sensor[2]), str(sensor[1])))
+                formattedData.append((str(sensor[2]), str(sensor[1]), int(sensor[0])))
             except IndexError:
                 self._logger.debug("While formatting a city list, a sensor row raised an IndexError")
                 continue
@@ -810,3 +810,37 @@ class MySQL:
 
         return tuple(formattedData)
         
+    async def getUpdateListByUser(self, userID: int) -> tuple:
+        '''
+        Return a tuple of cities containing the sensors associated with the provided userID
+        '''
+
+        if type(userID) != int:
+            raise TypeError
+
+        try:
+            rawUpdates, rawCities = list(), list()
+            rawUpdates = await self.readData(tableName = "Updates", options = {"person" : userID})
+            rawCities = await self.getCityList()
+        except Exception:
+            self._logger.warning("Impossible to get raw data of sensors's list")
+            rawUpdates = list()
+            rawCities = list()
+
+        # Prepare the data structure
+        existingUpdates = set()
+
+        # Format the output
+        for city in rawCities:                                                                  # For each city in our database
+            try:
+                if city[2] in list(map(lambda update: update[1], rawUpdates)):                  # Check if it's associated to an update for this user
+                    existingUpdates.add(city)
+            except IndexError:
+                self._logger.debug("While formatting a city list, a sensor row raised an IndexError")
+                continue
+            except Exception:
+                self._logger.error("Unexpected error occurred while formatting a city list")
+                existingUpdates = list()
+                break
+
+        return tuple(existingUpdates)
