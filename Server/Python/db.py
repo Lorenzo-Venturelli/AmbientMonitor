@@ -75,6 +75,7 @@ class MySQL:
             self._handler = mysql.connector.connect(host = self._system.settings["host_db"], user = self._system.settings["user_db"], 
                 password = self._system.settings["password_db"], database = self._system.settings["name_db"])
             self._cursor = self._handler.cursor()
+            self._handler.autocommit = True
             self._logger.debug("Connected to DB")
             self._isOpen = True
             return True
@@ -676,16 +677,24 @@ class MySQL:
         # Execute the query and fetch the result
         try:
             self._cursor.execute(query)
-            result = self._cursor.fetchall()
+            updates = self._cursor.fetchall()
         except Exception:
             self._logger.warning("Error occurred while reading data from Recordings", exc_info = True)
             return tuple()
 
+        # Get the list of supported cities
+        try:
+            cityList = await self.getCityList()
+        except Exception:
+            self._logger.warning("Error occurred while obtaining the city list", exc_info = True)
+            return tuple()
+
         # Format the output to return a tuple of sensors UID
-        sensors = list()
-        for row in result:
+        sensors = set()
+        for city in cityList:
             try:
-                sensors.append(row[0])
+                if int(city[2]) in list(map(lambda update: update[0], updates)):
+                    sensors.add(city)
             except Exception:
                 self._logger.warning("Impossible to format a row in getSensorByUser")
                 continue
@@ -704,16 +713,24 @@ class MySQL:
         if cities == tuple():
             return dict()
 
+        uids = set()
+
+        # Get UIDs from the list of cities
+        for city in cities:
+            uids.add(city[2])
+
+        uids = tuple(uids)
+
         # To avoid errors with the query, if there is only one city, let's fix the format
-        if len(cities) == 1:
-            cities = "({})".format(cities[0])
+        if len(uids) == 1:
+            uids = "({})".format(uids[0])
 
         # The result will be stored here
         formattedData = dict()
 
         # Create the query
-        query = "SELECT * FROM {table} R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM {table} R2 WHERE R2.UID = R1.UID) AND R1.UID IN {cities}"
-        query = query.format(table = self._SUPPORTED_DB_TABLES[0], cities = str(cities))
+        query = "SELECT * FROM {table} R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM {table} R2 WHERE R2.UID = R1.UID) AND R1.UID IN {UID}"
+        query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = str(uids))
 
         # For each city, request the data
         try:
