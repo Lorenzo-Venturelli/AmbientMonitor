@@ -1,4 +1,4 @@
-import time, datetime, threading, logging, asyncio
+import time, datetime, threading, logging, asyncio, pytz
 from typing import AsyncContextManager, Counter
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram.ext.dispatcher import run_async
@@ -36,6 +36,9 @@ class TelegramBot(threading.Thread):
         for item in self._DEFAULT_TELEGRAM_BOT_SETTINGS.keys():
             if item not in self._system.settings:
                 self._system.updateSettings(newSettings = {item : self._DEFAULT_TELEGRAM_BOT_SETTINGS[item]})
+
+        # Timezone object
+        self._tz = pytz.timezone("Europe/Rome")
 
         # Telegram Bot objects
         self._updater = None
@@ -527,7 +530,7 @@ class TelegramBot(threading.Thread):
                 try:
                     index = list(cityRecord.keys())[0]
                     timestamp = index[0]
-                    timestamp = datetime.datetime.fromtimestamp(timestamp)
+                    timestamp = datetime.datetime.fromtimestamp(timestamp, tz = self._tz)
                     answerMessage = answerMessage + "Last update: {day}/{month}/{year} {hour}:{minute} (UTC)\n".format(day = timestamp.day, 
                         month = timestamp.month, year = timestamp.year, hour = timestamp.hour, minute = timestamp.minute)
                 except Exception:
@@ -664,7 +667,7 @@ class TelegramBot(threading.Thread):
 
                     try:
                         # Prepare the data we'll need for the message
-                        time = datetime.datetime.fromtimestamp(update[0])
+                        time = datetime.datetime.fromtimestamp(update[0], tz = self._tz)
                         for sensor in cityList:
                             if sensor[2] == update[1]:
                                 city = sensor
