@@ -307,7 +307,50 @@ class TelegramBot(threading.Thread):
         update.message.reply_text("Non è ancora pronto")
 
     def _showBrief(self, update: dict, context: object) -> None:
-        update.message.reply_text("Non è ancora pronto")
+        '''
+        Show updates for every city in our system
+        '''
+
+        # Get a list of cities recorded in our system and the most recent record for each of them
+        try:
+            cityList = asyncio.run_coroutine_threadsafe(self._db.getCityList(), loop = self._asyncLoop).result(60)
+            updatePacket = asyncio.run_coroutine_threadsafe(self._db.getUpdateByCity(cities = cityList), loop = self._asyncLoop).result(60)
+        except Exception:
+            self._logger.warning("Impossible to fetch data - /show_brief", exc_info = True)
+            update.message.reply_text("Sorry, impossible to process this request at the moment. We are already investigating")
+            return
+
+        # Prepare the update message
+        updateMessage = "Complete, real-time view of our network:\n\n"
+
+        # For each record
+        for element in updatePacket:
+
+            try:
+                # Prepare the data we'll need for the message
+                time = datetime.datetime.fromtimestamp(element[0], tz = self._tz)
+                for sensor in cityList:
+                    if sensor[2] == element[1]:
+                        city = sensor
+            except Exception:
+                self._logger.warning("Impossible to prepare data for a periodic message", exc_info = True)
+                continue
+
+            try:
+                updateMessage = updateMessage + "{city} - {country} - {day}/{month}/{year} {hour}:{min}\n".format(city = city[0], country = city[1], 
+                    day = time.day, month = time.month, year = time.year, hour = time.hour, min = time.minute)
+
+                updateMessage = updateMessage + "Pressure: {pre} Pa\nTemperature: {temp}°C\nHumidity {hum}%\nLuminosity: {lux} Lux\n\n".format(pre = round(updatePacket[element]["Pressure"], 1),
+                temp = round(updatePacket[element]["Temperature"], 1), hum = round(updatePacket[element]["Humidity"], 1), lux = round(updatePacket[element]["Ligth"], 3))
+            except Exception:
+                self._logger.warning("An error occurred while formatting the city info for an updateMessage", exc_info = True)
+                continue
+
+        try:
+            update.message.reply_text(updateMessage)
+        except Exception:
+            self._logger.warning("An error occurred while sending the update message - /show_brief", exc_info = True)
+
     
     def _processRegister(self, update: dict, context: object, userID: int, userData: list) -> None:
         userName = "".join(userData[0:-1])                  # Split the Names from the Surname
@@ -531,7 +574,7 @@ class TelegramBot(threading.Thread):
                     index = list(cityRecord.keys())[0]
                     timestamp = index[0]
                     timestamp = datetime.datetime.fromtimestamp(timestamp, tz = self._tz)
-                    answerMessage = answerMessage + "Last update: {day}/{month}/{year} {hour}:{minute} (UTC)\n".format(day = timestamp.day, 
+                    answerMessage = answerMessage + "Last update: {day}/{month}/{year} {hour}:{minute}\n".format(day = timestamp.day, 
                         month = timestamp.month, year = timestamp.year, hour = timestamp.hour, minute = timestamp.minute)
                 except Exception:
                     self._logger.warning("An error occurred while converting the timestamp - /check_city", exc_info = True)
@@ -648,7 +691,7 @@ class TelegramBot(threading.Thread):
                 try:
                     cityList = await self._db.getSensorsByUser(ID = user)                   # Get a list of associated cities
                     updatePacket = await self._db.getUpdateByCity(cities = cityList)        # For all the associated cities, get the most recent record
-                except:
+                except Exception:
                     self._logger.warning("Impossible to fetch data for the periodic update", exc_info = True)
                     continue
 
@@ -676,7 +719,7 @@ class TelegramBot(threading.Thread):
                         continue
 
                     try:
-                        updateMessage = updateMessage + "{city} - {country} - {day}/{month}/{year} {hour}:{min} (UTC)\n".format(city = city[0], country = city[1], 
+                        updateMessage = updateMessage + "{city} - {country} - {day}/{month}/{year} {hour}:{min}\n".format(city = city[0], country = city[1], 
                             day = time.day, month = time.month, year = time.year, hour = time.hour, min = time.minute)
 
                         updateMessage = updateMessage + "Pressure: {pre} Pa\nTemperature: {temp}°C\nHumidity {hum}%\nLuminosity: {lux} Lux\n\n".format(pre = round(updatePacket[update]["Pressure"], 1),
