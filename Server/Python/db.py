@@ -1,4 +1,4 @@
-import logging, sys, time, json, copy, asyncio, datetime
+import logging, sys, time, json, copy, asyncio, datetime, pytz
 
 from interfaces import System
 try:
@@ -613,8 +613,17 @@ class MySQL:
                             newBlock = datetime.datetime(year = newBlock.year, month = newBlock.month, day = newBlock.day, hour = newBlock.hour)
                             tmpRecord[0] = int(newBlock.timestamp())
                             for element in (2, 3, 4, 5):
-                                tmpRecord[element] = tmpRecord[element] + record[element]
+                                tmpRecord[element] = record[element]
                             iterations = 1
+
+                    if iterations != 0:
+                        # Also for the last block, even if it's not complete, store it
+                        for element in (2, 3, 4, 5):
+                            tmpRecord[element] = tmpRecord[element] / iterations    # Calculate the average for each value
+                        
+                        # Now that we have calculated a summarized record associated to this block, let's save it in a valid format
+                        avgRecords["values"][str(tmpRecord[0])] = {"pressure" : tmpRecord[2], "temperature" : tmpRecord[3], "humidity" : tmpRecord[4], "ligth" : tmpRecord[5]}
+                        
 
                     # Now we have processed every block in the given range for this UID so it's time to remove the old records and insert the new ones
                     try:
@@ -701,12 +710,12 @@ class MySQL:
 
         return tuple(sensors)
 
-    async def getUpdateByCity(self, cities: tuple) -> dict:
+    async def getUpdateByCity(self, cities: tuple, options: dict = None) -> dict:
         '''
         Get a structured packet of records. Select the most recent record for each city in the list
         '''
 
-        if type(cities) != tuple:
+        if type(cities) != tuple and (options != None and type(options) != dict):
             raise TypeError
 
         # An empty tuple is meaningless, let's return immediately
@@ -728,9 +737,63 @@ class MySQL:
         # The result will be stored here
         formattedData = dict()
 
+        if options != None:
+            if "mode" not in options.keys():
+                raise Exception("Invalid options")
+
+            try:
+                if "timezone" not in options.keys():
+                    tz = pytz.timezone("UTC")
+                else:
+                    tz = pytz.timezone(options["timezone"])
+            except Exception:
+                self._logger.warning("Invalid timezone provided to fetch data")
+                raise Exception("Invalid timezone")
+
         # Create the query
-        query = "SELECT * FROM {table} R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM {table} R2 WHERE R2.UID = R1.UID) AND R1.UID IN {UID}"
-        query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = str(uids))
+        if options == None or options["mode"] == "auto":
+            query = "SELECT * FROM {table} R1 WHERE R1.timestamp = (SELECT MAX(R2.timestamp) FROM {table} R2 WHERE R2.UID = R1.UID) AND R1.UID IN {UID}"
+            query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = str(uids))
+        elif options["mode"] == "daily":
+            query = "SELECT * FROM {table} R1 WHERE R1.timestamp <= {maxTime} AND R1.timestamp >= {minTime} AND R1.UID in {UID}"
+            maxTime = datetime.datetime.utcnow()
+            maxTime = datetime.datetime(year = maxTime.year, month = maxTime.month, day = maxTime.day, hour = 0, minute = 0, second = 0)
+            maxTime = tz.localize(maxTime)
+            minTime = maxTime + datetime.timedelta(days = -1)
+            maxTime = int(maxTime.timestamp())
+            minTime = int(minTime.timestamp())
+            query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = uids, maxTime = maxTime, minTime = minTime)
+        elif options["mode"] == "weekly":
+            query = "SELECT * FROM {table} R1 WHERE R1.timestamp <= {maxTime} AND R1.timestamp >= {minTime} AND R1.UID in {UID}"
+            maxTime = datetime.datetime.utcnow()
+            maxTime = datetime.datetime(year = maxTime.year, month = maxTime.month, day = maxTime.day, hour = 0, minute = 0, second = 0)
+            maxTime = tz.localize(maxTime)
+            minTime = maxTime + datetime.timedelta(weeks = -1)
+            maxTime = int(maxTime.timestamp())
+            minTime = int(minTime.timestamp())
+            query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = uids, maxTime = maxTime, minTime = minTime)
+        elif options["mode"] == "montly":
+            query = "SELECT * FROM {table} R1 WHERE R1.timestamp <= {maxTime} AND R1.timestamp >= {minTime} AND R1.UID in {UID}"
+            maxTime = datetime.datetime.utcnow()
+            maxTime = datetime.datetime(year = maxTime.year, month = maxTime.month, day = maxTime.day, hour = 0, minute = 0, second = 0)
+            maxTime = tz.localize(maxTime)
+            minTime = maxTime + datetime.timedelta(days = -30)
+            maxTime = int(maxTime.timestamp())
+            minTime = int(minTime.timestamp())
+            query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = uids, maxTime = maxTime, minTime = minTime)
+        elif options["mode"] == "yearly":
+            query = "SELECT * FROM {table} R1 WHERE R1.timestamp <= {maxTime} AND R1.timestamp >= {minTime} AND R1.UID in {UID}"
+            maxTime = datetime.datetime.utcnow()
+            maxTime = datetime.datetime(year = maxTime.year, month = maxTime.month, day = maxTime.day, hour = 0, minute = 0, second = 0)
+            maxTime = tz.localize(maxTime)
+            minTime = maxTime + datetime.timedelta(days = -365)
+            maxTime = int(maxTime.timestamp())
+            minTime = int(minTime.timestamp())
+            query = query.format(table = self._SUPPORTED_DB_TABLES[0], UID = uids, maxTime = maxTime, minTime = minTime)
+        else:
+            self._logger.debug("Invalid mode for getUpdateByCity")
+            raise Exception("Invalid mode")
+
 
         # For each city, request the data
         try:

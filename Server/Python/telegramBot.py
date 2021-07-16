@@ -1,8 +1,10 @@
-import time, datetime, threading, logging, asyncio, pytz
+import os, datetime, threading, logging, asyncio, pytz
+from matplotlib import use
 from typing import AsyncContextManager, Counter
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram.ext.dispatcher import run_async
 from telegram.ext.filters import MessageFilter
+import matplotlib.pyplot as plt
 from interfaces import Data, Event, System
 from db import MySQL
 
@@ -304,7 +306,37 @@ class TelegramBot(threading.Thread):
             return
  
     def _getStats(self, update: dict, context: object) -> None:
-        update.message.reply_text("Non è ancora pronto")
+
+        # Get the User ID from the enviornment. It is the unique Telegram Chat ID.
+        try:
+            userID = update.message.chat.id
+        except KeyError:                                            # There is something wrong in the context, this message can't be processed
+            self._logger.warning("Impossible to get the chat ID from the context - /get_stats")
+            userID = None
+        except Exception:                                           # There is something really wrong here, abort this callback
+            self._logger.error("Unexpected error occurred while getting the chat ID from the context - /get_stats")
+            return
+
+        if userID == None:                                          # We can't proceed without the unique chat ID
+            update.message.reply_text("Sorry but something went wrong, we can't get your ChatID. Reopen Telegram and try again")
+            return
+
+        try:
+            # Obtain a list of cities
+            userData = str(update.message.text).replace("/get_stats", "").replace(",", "").replace(";", "").split()
+            userData = list(map(lambda word: word.strip().capitalize(), userData))
+        except Exception:
+            self._logger.warning("Impossible to get a list of cities from the message - /get_stats")
+            userData = list()
+
+        if userData == list():                                  # The user didn't provide any city
+            self._activeUserStateLock.acquire()
+            self._activeUserState[userID] = "get_stats"         # Save this user's state in order to keep processing this command when the next message arrives
+            self._activeUserStateLock.release()
+            update.message.reply_text("Please type the name of one or more cities. To see a list of available cities type /city_list")
+        else:
+            self._processGetStats(update = update, context = context, userID = userID, userData = userData)
+            return
 
     def _showBrief(self, update: dict, context: object) -> None:
         '''
@@ -350,8 +382,7 @@ class TelegramBot(threading.Thread):
             update.message.reply_text(updateMessage)
         except Exception:
             self._logger.warning("An error occurred while sending the update message - /show_brief", exc_info = True)
-
-    
+   
     def _processRegister(self, update: dict, context: object, userID: int, userData: list) -> None:
         userName = "".join(userData[0:-1])                  # Split the Names from the Surname
         userSurname = userData[-1]
@@ -593,6 +624,125 @@ class TelegramBot(threading.Thread):
                 # Send the message
                 update.message.reply_text(answerMessage)
 
+    def _processGetStats(self, update: dict, context: object, userID: int, userData: list) -> None:
+
+        # Get a list of registered sensors
+        try:
+            cityList = asyncio.run_coroutine_threadsafe(self._db.getCityList(), loop = self._asyncLoop).result(60)
+        except asyncio.TimeoutError:
+            cityList = None
+        except Exception:
+            self._logger.warning("Impossible to get a city list")
+            cityList = None
+
+        if cityList == None:                                # Impossible to get a list of cities so we can't go on
+            update.message.reply_text("Sorry, our system is overloaded at the moment. Please try again later")
+            return
+        else:
+            # We have a list of valid sensors, check if the user prompted a valid list
+            valid = set()
+            for city in cityList:
+                if city[0] in userData:
+                    valid.add(city)
+
+            valid = tuple(valid)
+            try:
+                daySet = asyncio.run_coroutine_threadsafe(self._db.getUpdateByCity(cities = valid, options = {"mode" : "daily", "timezone" : "Europe/Rome"}), loop = self._asyncLoop).result(60)
+                weekSet = asyncio.run_coroutine_threadsafe(self._db.getUpdateByCity(cities = valid, options = {"mode" : "weekly", "timezone" : "Europe/Rome"}), loop = self._asyncLoop).result(60)
+            except Exception:
+                self._logger.warning("An error occurred while fetching data - /get_stats", exc_info = True)
+                update.message.reply_text("Sorry, an error occurred, we are already investigating")
+                return
+            
+            # Prepare a new data structure to store only data that will be used in the plot
+            validDaySet, validWeekSet = list(), list()
+
+            try:
+                # For each record in both sets, decide wether to keep it or not. If yes, also format it
+                for record in daySet:
+                    tmp = {"time" : datetime.datetime.fromtimestamp(record[0], tz = self._tz), "city" : record[1], "Pressure" : round(daySet[record]["Pressure"], 1), 
+                        "Temperature" : round(daySet[record]["Temperature"], 1), "Humidity" : round(daySet[record]["Humidity"], 1), "Ligth" : round(daySet[record]["Ligth"], 3)}
+
+                    if validDaySet == list():                                       # Always keep the first record in the set
+                        validDaySet.append(tmp)
+                    else:                                                           # For the day set, keep a record every 4 hours or more
+                        if (tmp["time"] - validDaySet[-1]["time"]) >= datetime.timedelta(hours = 4):
+                            validDaySet.append(tmp)
+
+                for record in weekSet:
+                    tmp = {"time" : datetime.datetime.fromtimestamp(record[0], tz = self._tz), "city" : record[1], "Pressure" : round(weekSet[record]["Pressure"], 1), 
+                        "Temperature" : round(weekSet[record]["Temperature"], 1), "Humidity" : round(weekSet[record]["Humidity"], 1), "Ligth" : round(weekSet[record]["Ligth"], 3)}
+
+                    if validWeekSet == list():                                      # Always keep the first record in the set
+                        validWeekSet.append(tmp)
+                    else:                                                           # For the week set, keep a record every 12 hours or more
+                        if (tmp["time"] - validWeekSet[-1]["time"]) >= datetime.timedelta(hours = 12):
+                            validWeekSet.append(tmp)
+            except Exception:
+                self._logger.warning("An error occurred while formatting and selecting data - /get_stats", exc_info = True)
+                update.message.reply_text("Sorry, an error occurred, we are already investigating")
+                return
+
+
+            # Prepare structures to store plotting data
+            dayTimestamp, dayData = list(), {"Pressure" : list(), "Temperature" : list(), "Humidity" : list(), "Ligth": list()}
+            weekTimestamp, weekData = list(), {"Pressure" : list(), "Temperature" : list(), "Humidity" : list(), "Ligth": list()}
+
+            # For each city
+            for city in valid:
+                try:
+                    # Fulfill those structures with the records previously selected
+                    for record in validDaySet:
+                        if int(record["city"]) == int(city[2]):                     # If this record is for this city
+                            dayTimestamp.append(record["time"].strftime('%H:%M %d/%m/%Y'))
+                            dayData["Pressure"].append(record["Pressure"])
+                            dayData["Temperature"].append(record["Temperature"])
+                            dayData["Humidity"].append(record["Humidity"])
+                            dayData["Ligth"].append(record["Ligth"])
+
+                    for record in validWeekSet:
+                        if int(record["city"]) == int(city[2]):                     # If this record is for this city
+                            weekTimestamp.append(record["time"].strftime('%H:%M %d/%m/%Y'))
+                            weekData["Pressure"].append(record["Pressure"])
+                            weekData["Temperature"].append(record["Temperature"])
+                            weekData["Humidity"].append(record["Humidity"])
+                            weekData["Ligth"].append(record["Ligth"])
+                except Exception:
+                    self._logger.warning("Impossible to fulfill data structures - /get_stats", exc_info = True)
+                    update.message.reply_text("Sorry, an error occurred, we are already investigating")
+                    return
+
+                try:
+                    constants = {"Pressure" : "Pa", "Temperature" : "°C", "Humidity" : "%", "Ligth" : "Lux"}
+                    # Create the plots and send them
+                    for element in constants.keys():
+                        f = plt.figure(userID, figsize = (20, 10))
+                        plt.clf()
+                        plt.xlabel("Time")
+                        plt.ylabel(constants[element])
+                        plt.title("Daily - {element}".format(element = element))
+                        plt.plot(dayTimestamp, dayData[element])
+                        plt.savefig("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element))
+
+                        context.bot.send_photo(chat_id = userID, photo = open("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element), "rb"))
+                        os.remove("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element))
+
+                    for element in constants.keys():
+                        f = plt.figure(userID, figsize = (20, 10))
+                        plt.clf()
+                        plt.xlabel("Time")
+                        plt.ylabel(constants[element])
+                        plt.title("Weekly - {element}".format(element = element))
+                        plt.plot(weekTimestamp, weekData[element])
+                        plt.savefig("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element))
+
+                        context.bot.send_photo(chat_id = userID, photo = open("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element), "rb"))
+                        os.remove("../Files/tmp/{id}_{element}.png".format(id = str(userID), element = element))
+                except Exception:
+                    self._logger.warning("Impossible to build and send plots - /get_stats", exc_info = True)
+                    update.message.reply_text("Sorry, an error occurred, we are already investigating")
+                    return
+
     def _processText(self, update: dict, context: object) -> None:
         '''
         Process text messages that are not commands
@@ -664,6 +814,23 @@ class TelegramBot(threading.Thread):
 
                 if userData != list():                                  # The user didn't provide any city
                     self._processGetUpdate(update = update, context = context, userID = userID, userData = userData)
+                else:
+                    update.message.reply_text("You must provide a valid city to perform this command")
+            elif self._activeUserState[userID] == self._SUPPORTED_TELEGRAM_COMMANDS[7]:         # Get stats command
+                self._activeUserStateLock.acquire()
+                del self._activeUserState[userID]                   # Remove the active state for this user
+                self._activeUserStateLock.release()
+
+                try:
+                    # Obtain a list of cities
+                    userData = str(update.message.text).replace("/get_stats", "").replace(",", "").replace(";", "").split()
+                    userData = list(map(lambda word: word.strip().capitalize(), userData))
+                except Exception:
+                    self._logger.warning("Impossible to get a list of cities from the message - /get_stats")
+                    userData = list()
+
+                if userData != list():                                  # The user didn't provide any city
+                    self._processGetStats(update = update, context = context, userID = userID, userData = userData)
                 else:
                     update.message.reply_text("You must provide a valid city to perform this command")
             else:                                                                               # This active state is not actually supported
