@@ -22,10 +22,10 @@ if __name__ == "__main__":
             logger = logging.getLogger(name = "systemLog")                      # Create the logger handler
 
             if len(sys.argv) > 1:                                               # Check inline args
-                if sys.argv[1] == "debug":                                      # Run the probram in debug mode
+                if sys.argv[1] == "debug":                                      # Run the program in debug mode
                     logger.setLevel(logging.DEBUG)                              # Verbose logging
                 elif sys.argv[1] == "info":
-                    logger.setLevel(logging.info)                               # Verbose logging
+                    logger.setLevel(logging.INFO)                               # Verbose logging
                 else:
                     logger.setLevel(logging.ERROR)                              # Only error messages
             else:
